@@ -1,4 +1,5 @@
 import logging
+import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
@@ -439,6 +440,30 @@ async def handle_oauth_callback(
             connection_data.credentials, acc_data.external_id, None
         )
         for txn_data in transactions_data:
+            # Providers occasionally emit the same logical transaction twice
+            # in a single fetch — typically a scheduled/pending row
+            # re-emitted as a separate posted row, or a credit-card
+            # installment that's posted on the current bill and still
+            # scheduled against the next. Fingerprint match prevents the
+            # second copy from landing.
+            synced_dup = await _find_synced_duplicate(session, account.id, txn_data)
+            if synced_dup:
+                if synced_dup.status == "pending" and txn_data.status == "posted":
+                    synced_dup.status = "posted"
+                    synced_dup.external_id = txn_data.external_id
+                    synced_dup.raw_data = txn_data.raw_data
+                    if (
+                        txn_data.bill_external_id
+                        and synced_dup.effective_bill_date is None
+                    ):
+                        bill = bills_by_external_id.get(txn_data.bill_external_id)
+                        if bill is not None and synced_dup.bill_id != bill.id:
+                            synced_dup.bill_id = bill.id
+                            apply_effective_date(
+                                synced_dup, account, bill_due_date=bill.due_date
+                            )
+                continue
+
             category_id = await _match_pluggy_category(
                 session, user_id, txn_data.pluggy_category, enabled=use_provider_cats
             )
@@ -528,6 +553,36 @@ def _description_similarity(a: str | None, b: str | None) -> float:
     return len(intersection) / max(len(tokens_a), len(tokens_b))
 
 
+# Trailing per-event identifiers (document number, authorization code, etc.)
+# that vary across otherwise-identical descriptions of the same logical
+# operation. Stripping them yields the stable prefix we fingerprint in
+# `_find_synced_duplicate`.
+_IDENTIFIER_SUFFIX_RE = re.compile(
+    r"[\s\-:|/.;]*\b(?:DOCTO|DOC|NSU|TID|REF|AUT|OP|OPER|TRANS|TRX|ID)[:.]?\s*\d+\b",
+    re.IGNORECASE,
+)
+_TRAILING_DIGITS_RE = re.compile(r"\s+\d{4,}\s*$")
+
+
+def _description_root(s: str | None) -> str:
+    """Stable prefix of a transaction description for duplicate detection.
+
+    Strips trailing identifiers (document/authorization/reference numbers)
+    that change between otherwise-identical descriptions, plus surrounding
+    punctuation; lowercases and collapses whitespace.
+    """
+    if not s:
+        return ""
+    text = s.strip()
+    while True:
+        new = _IDENTIFIER_SUFFIX_RE.sub("", text).rstrip(" -:|/.;")
+        if new == text:
+            break
+        text = new
+    text = _TRAILING_DIGITS_RE.sub("", text).rstrip(" -:|/.;")
+    return " ".join(text.lower().split())
+
+
 async def _fuzzy_match_manual(
     session: AsyncSession,
     account_id: uuid.UUID,
@@ -562,6 +617,91 @@ async def _fuzzy_match_manual(
 
     if best_match and best_score >= 0.6:
         return best_match
+    return None
+
+
+async def _find_synced_duplicate(
+    session: AsyncSession,
+    account_id: uuid.UUID,
+    txn_data,
+) -> Optional[Transaction]:
+    """Find an existing synced row that the incoming `txn_data` is a twin of.
+
+    The `(account_id, external_id)` lookup only catches the case where a
+    provider keeps the same id while a row's `status` flips pending→posted.
+    It misses two patterns where the same logical operation comes back with
+    two different external ids:
+
+    1. The provider re-emits the operation with a new id when its state
+       changes — e.g. a scheduled transfer that posts as a separate row.
+       Same date, amount, type, and description once trailing per-event
+       identifiers are stripped.
+    2. A credit-card installment that lands on the current bill but is also
+       still scheduled against the next bill. Two different external ids
+       and two different bills, but the same installment fingerprint
+       `(purchase_date, number, total, amount, type)`.
+
+    Returns the existing Transaction the caller should reuse; the caller
+    decides whether to upgrade its status (pending→posted + swap external_id)
+    or skip the incoming insert. Synthetic bill-charge rows
+    (`bill_charge:*`) are excluded — they have their own idempotency keys.
+    """
+    # Path 1: installment fingerprint. Highly specific, so we don't require a
+    # description match on top.
+    if (
+        txn_data.installment_purchase_date is not None
+        and txn_data.installment_number is not None
+        and txn_data.total_installments is not None
+    ):
+        result = await session.execute(
+            select(Transaction).where(
+                Transaction.account_id == account_id,
+                Transaction.source == "sync",
+                Transaction.installment_purchase_date == txn_data.installment_purchase_date,
+                Transaction.installment_number == txn_data.installment_number,
+                Transaction.total_installments == txn_data.total_installments,
+                Transaction.amount == txn_data.amount,
+                Transaction.type == txn_data.type,
+                Transaction.external_id != txn_data.external_id,
+            )
+        )
+        for candidate in result.scalars():
+            if candidate.external_id and candidate.external_id.startswith("bill_charge:"):
+                continue
+            return candidate
+
+    # Path 2: same date/amount/type with matching description root. Tightly
+    # scoped to avoid colliding with two genuine same-day same-amount repeats
+    # (e.g. two identical fares charged the same day): we require either the
+    # raw descriptions to differ (i.e. normalization stripped something) or
+    # the statuses to differ — the signature of one operation re-emitted
+    # under a new id.
+    incoming_root = _description_root(txn_data.description)
+    if not incoming_root:
+        return None
+
+    result = await session.execute(
+        select(Transaction).where(
+            Transaction.account_id == account_id,
+            Transaction.source == "sync",
+            Transaction.date == txn_data.date,
+            Transaction.amount == txn_data.amount,
+            Transaction.type == txn_data.type,
+            Transaction.external_id != txn_data.external_id,
+        )
+    )
+    for candidate in result.scalars():
+        if candidate.external_id and candidate.external_id.startswith("bill_charge:"):
+            continue
+        if _description_root(candidate.description) != incoming_root:
+            continue
+        descriptions_differ = (candidate.description or "").strip() != (
+            txn_data.description or ""
+        ).strip()
+        statuses_differ = candidate.status != txn_data.status
+        if descriptions_differ or statuses_differ:
+            return candidate
+
     return None
 
 
@@ -1006,6 +1146,34 @@ async def sync_connection(
                     if not fuzzy_match.payee and txn_data.payee:
                         fuzzy_match.payee = txn_data.payee
                     merged_count += 1
+                    continue
+
+                # Pass 3: synced-vs-synced fingerprint match. Catches
+                # provider duplicates where the same logical operation comes
+                # back with two different external ids — typically a
+                # scheduled/pending row re-emitted as a separate posted row,
+                # or a credit-card installment that's posted on the current
+                # bill and still scheduled against the next one.
+                synced_dup = await _find_synced_duplicate(
+                    session, account.id, txn_data
+                )
+                if synced_dup:
+                    if synced_dup.status == "pending" and txn_data.status == "posted":
+                        # Posted truth wins: swap in the new id so subsequent
+                        # syncs match by external_id and update raw_data.
+                        synced_dup.status = "posted"
+                        synced_dup.external_id = txn_data.external_id
+                        synced_dup.raw_data = txn_data.raw_data
+                        if (
+                            txn_data.bill_external_id
+                            and synced_dup.effective_bill_date is None
+                        ):
+                            bill = bills_by_external_id.get(txn_data.bill_external_id)
+                            if bill is not None and synced_dup.bill_id != bill.id:
+                                synced_dup.bill_id = bill.id
+                                apply_effective_date(
+                                    synced_dup, account, bill_due_date=bill.due_date
+                                )
                     continue
 
                 category_id = await _match_pluggy_category(

@@ -1,7 +1,7 @@
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { cn } from '@/lib/utils'
-import { Component, type ReactNode } from 'react'
+import { Component, memo, type ReactNode } from 'react'
 import { AgentChart, type ChartSpec } from '@/components/agents/agent-chart'
 
 interface Props {
@@ -15,8 +15,13 @@ interface Props {
  * Deliberately conservative: no raw HTML, no images, links open in a new
  * tab with rel=noopener. Sized to feel right inside the chat bubble — not
  * a documentation page.
+ *
+ * Wrapped in React.memo at the bottom so static assistant messages
+ * (including embedded `securo-chart` blocks) don't re-render on every
+ * keystroke in the chat input — they were causing Recharts to fully
+ * reanimate per character typed.
  */
-export function Markdown({ children, className }: Props) {
+function _Markdown({ children, className }: Props) {
   return (
     <div className={cn('text-sm leading-relaxed [&>:first-child]:mt-0 [&>:last-child]:mb-0', className)}>
       <ReactMarkdown
@@ -120,6 +125,15 @@ export function Markdown({ children, className }: Props) {
     </div>
   )
 }
+
+/** Memoized export — keystrokes in the chat input force the parent to
+ *  re-render, but assistant messages don't change, so we skip rendering
+ *  them entirely when `children`/`className` are referentially the
+ *  same. Critical for chats that contain a recharts figure (Recharts
+ *  treats new prop refs as new data and re-runs its enter animations). */
+export const Markdown = memo(_Markdown, (prev, next) =>
+  prev.children === next.children && prev.className === next.className,
+)
 
 
 interface ChartBoundaryProps {

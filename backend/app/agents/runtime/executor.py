@@ -260,18 +260,57 @@ def _format_page_context(page_context: Optional[dict[str, Any]]) -> Optional[str
     return "\n".join(lines) if len(lines) > 2 else None
 
 
+def _build_agent_identity_primer(agent: Agent) -> str:
+    """Baseline persona injected BEFORE the user's system_prompt.
+
+    Tells the model two things it had no way to know before:
+      1. It's running inside Securo — an open-source, self-hosted
+         personal-finance app — and what kind of help that implies.
+      2. Its own name and stated role, taken from the agent row itself
+         (the user picked them in the UI).
+
+    The user's `system_prompt` then runs AFTER this, so it can extend
+    or override anything here without losing the product framing.
+    """
+    name = (agent.name or "Assistant").strip()
+    description = (agent.description or "").strip()
+    lines = [
+        "## Who you are",
+        f"You are **{name}**, an AI assistant running inside **Securo** — an "
+        "open-source, self-hosted personal-finance app the user owns and "
+        "runs on their own infrastructure. The user is the owner of the "
+        "data you operate on; everything you read/write belongs to them.",
+    ]
+    if description:
+        lines.append(f"\nYour stated role / specialty: {description}")
+    lines.append(
+        "\nGround rules:\n"
+        "- Answer in the user's language (Portuguese, English, Spanish, etc.).\n"
+        "- You have tools that read the user's data and `propose_*` tools "
+        "that draft changes for the user to approve — those never apply "
+        "by themselves.\n"
+        "- Be concise, direct, and willing to make calls. Don't pad with "
+        "warnings or boilerplate."
+    )
+    return "\n".join(lines)
+
+
 def _classify_error(exc: Exception) -> tuple[str, str]:
+    # Always include the underlying exception message — without it the
+    # UI just shows "unreachable" / "auth" with no clue about the actual
+    # cause (wrong model id, expired key, missing endpoint, etc.).
+    detail = str(exc).strip() or exc.__class__.__name__
     if isinstance(exc, LLMAuthError):
-        return ("auth", "The LLM provider rejected the credentials. Check the API key in your environment.")
+        return ("auth", f"LLM provider rejected the credentials. {detail}")
     if isinstance(exc, LLMRateLimitError):
-        return ("rate_limit", "The LLM provider is rate-limiting. Please retry in a moment.")
+        return ("rate_limit", f"LLM provider is rate-limiting. {detail}")
     if isinstance(exc, LLMUnavailableError):
-        return ("unavailable", "The LLM provider is unreachable. Check the network or try a different provider.")
+        return ("unavailable", f"LLM provider error: {detail}")
     if isinstance(exc, LLMNotSupportedError):
-        return ("not_supported", str(exc))
+        return ("not_supported", detail)
     if isinstance(exc, LLMError):
-        return (exc.code, str(exc))
-    return ("unknown", str(exc))
+        return (exc.code, detail)
+    return ("unknown", detail)
 
 
 class AgentExecutor:
@@ -296,8 +335,14 @@ class AgentExecutor:
         )
         await conversation_service.update_title_if_empty(session, conversation_id, user_message)
 
-        # 2. Build the message list (runtime guardrail + system primer +
-        #    agent prompt + history).
+        # 2. Build the message list. Order, top to bottom:
+        #      1. Runtime guardrail (app-level invariants — always)
+        #      2. Agent identity primer (who you are + Securo framing)
+        #      3. User-defined system_prompt (extends or overrides #2)
+        #      4. Auto-context primer (user data: name, currency, accounts)
+        #      5. Page-context primer (where the user is right now)
+        #      6. Conversation history
+        #      7. The new user message (appended in step 4 below)
         history = await conversation_service.list_messages(session, conversation_id, limit=agent.max_history_messages * 2 + 2)
         messages: list[ChatMessage] = []
         # Runtime guardrail goes FIRST and applies to every conversation,
@@ -305,6 +350,15 @@ class AgentExecutor:
         # in the propose-vs-action framing and the no-silent-substitution
         # rule. Agents can build on top of these but can't undo them.
         messages.append(ChatMessage(role="system", content=_RUNTIME_GUARDRAIL))
+        # Agent identity — name + description + Securo framing. Ensures
+        # the model knows what product it lives in and what role it was
+        # configured for, even when the user leaves system_prompt blank.
+        messages.append(ChatMessage(role="system", content=_build_agent_identity_primer(agent)))
+        # User-defined system prompt extends/overrides the identity
+        # primer. Goes BEFORE the data primers so it shapes the persona,
+        # not just the per-turn answer.
+        if agent.system_prompt and agent.system_prompt.strip():
+            messages.append(ChatMessage(role="system", content=agent.system_prompt))
         # Optional context primer — user name, currency, accounts, etc.
         # Cheap orientation so the agent doesn't need to call list_accounts
         # on every "what's my balance?" question.
@@ -318,8 +372,6 @@ class AgentExecutor:
                         messages.append(ChatMessage(role="system", content=primer))
             except Exception:  # noqa: BLE001
                 logger.exception("context primer failed; continuing without it")
-        if agent.system_prompt:
-            messages.append(ChatMessage(role="system", content=agent.system_prompt))
         # Page-context primer — orientation about where the user is when
         # they sent THIS message. Goes after the agent's prompt so the
         # base persona always wins, but before history so prior turns
@@ -394,6 +446,10 @@ class AgentExecutor:
                         usage_input = chunk.usage.input_tokens
                         usage_output = chunk.usage.output_tokens
             except LLMError as exc:
+                # Log the full chain — the user-facing string is short by
+                # design, but we want the traceback (and any wrapped
+                # httpx error) in the backend logs for debugging.
+                logger.exception("LLM provider call failed (kind=%s)", type(exc).__name__)
                 code, msg = _classify_error(exc)
                 yield ExecutorEvent(type="error", error_code=code, error_message=msg)
                 yield ExecutorEvent(type="done", finish_reason="error")

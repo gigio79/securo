@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   Area,
@@ -134,7 +135,7 @@ function formatYAxis(v: number | string | undefined | null, currency?: string): 
   }).format(v)
 }
 
-export function AgentChart({ spec }: Props) {
+function _AgentChart({ spec }: Props) {
   const { t } = useTranslation()
   if (!spec || !Array.isArray(spec.data) || spec.data.length === 0) {
     return (
@@ -269,3 +270,14 @@ function renderChart(
     </ChartCmp>
   )
 }
+
+/** Memoized export. The whole reason this exists: every keystroke in
+ *  the chat textarea triggers a parent re-render, and Recharts treats
+ *  any new prop reference as new data — reanimating slices and bars.
+ *  We compare specs by serialized string (cheap; specs are tiny JSON
+ *  blobs the LLM emitted once) so a re-render with the same spec is a
+ *  no-op. */
+export const AgentChart = memo(
+  _AgentChart,
+  (prev, next) => JSON.stringify(prev.spec) === JSON.stringify(next.spec),
+)

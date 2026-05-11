@@ -38,7 +38,7 @@ from mcp_server.tools._helpers import num, parse_date, parse_uuid_list
             "description_contains": {"type": "string", "description": "Case-insensitive substring match against the transaction description — use this to scope to a merchant/keyword like 'uber', 'spotify', 'amigos do bem'."},
             "status": {"type": "string", "enum": ["posted", "pending", "all"], "default": "posted", "description": "Default 'posted' = only money that already moved. Use 'pending' for scheduled/recurring not yet settled, or 'all' to include both."},
             "exclude_transfers": {"type": "boolean", "default": True},
-            "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 25, "description": "Max bucket rows in the result. Capped at 50."},
         },
         "additionalProperties": False,
     },
@@ -60,8 +60,11 @@ async def aggregate(
     description_contains: str | None = None,
     status: str = "posted",
     exclude_transfers: bool = True,
-    limit: int = 50,
+    limit: int = 25,
 ) -> dict[str, Any]:
+    # Hard cap regardless of LLM input — keeps payload small enough for
+    # token-tight providers.
+    limit = max(1, min(int(limit), 50))
     amount_col = func.coalesce(Transaction.amount_primary, Transaction.amount)
 
     # Group expression + label expression.

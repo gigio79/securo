@@ -45,6 +45,7 @@ from mcp_server.tools._helpers import num, parse_date, parse_uuid, parse_uuid_li
             },
             "category_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}, "description": "Filter to specific categories"},
             "payee_id": {"type": "string", "format": "uuid", "description": "Filter to a single payee"},
+            "group_id": {"type": "string", "format": "uuid", "description": "Filter to transactions split with this expense-sharing group (Splitwise-style). The id comes from `list_groups`. Use this — NOT a `search:'group_id:...'` hack — to ask 'show all transactions in group X'."},
             "from_date": {"type": "string", "format": "date", "description": "Inclusive lower bound (YYYY-MM-DD)"},
             "to_date": {"type": "string", "format": "date", "description": "Inclusive upper bound (YYYY-MM-DD)"},
             "search": {"type": "string", "description": "Substring match against description or payee"},
@@ -84,7 +85,7 @@ from mcp_server.tools._helpers import num, parse_date, parse_uuid, parse_uuid_li
                 "enum": ["cash", "accrual"],
                 "description": "Override the global accounting mode for this query. Affects how credit-card transactions are bucketed by date.",
             },
-            "limit": {"type": "integer", "minimum": 1, "maximum": 200, "default": 50},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50, "default": 25, "description": "Max rows per page. Capped at 50 — bigger pages blow up token budgets on small models. Use `total` for counts and pagination via `page` to walk longer lists."},
             "page": {"type": "integer", "minimum": 1, "default": 1},
         },
         "additionalProperties": False,
@@ -99,6 +100,7 @@ async def list_transactions(
     account_types: list[str] | None = None,
     category_ids: list[str] | None = None,
     payee_id: str | None = None,
+    group_id: str | None = None,
     from_date: str | None = None,
     to_date: str | None = None,
     search: str | None = None,
@@ -112,9 +114,12 @@ async def list_transactions(
     sort_by: str = "transaction_date",
     sort_dir: str = "desc",
     accounting_mode: str | None = None,
-    limit: int = 50,
+    limit: int = 25,
     page: int = 1,
 ) -> dict[str, Any]:
+    # Hard cap regardless of what the LLM asks — the schema says 50 but
+    # not every provider enforces additionalProperties / maximum.
+    limit = max(1, min(int(limit), 50))
     txs, total = await transaction_service.get_transactions(
         session,
         ctx.user_id,
@@ -122,6 +127,7 @@ async def list_transactions(
         account_types=account_types or None,
         category_ids=parse_uuid_list(category_ids),
         payee_id=parse_uuid(payee_id) if payee_id else None,
+        group_id=parse_uuid(group_id) if group_id else None,
         from_date=parse_date(from_date),
         to_date=parse_date(to_date),
         search=search,

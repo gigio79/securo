@@ -10,6 +10,7 @@
     "title": "Command palette",
     "description": "Search transactions, accounts, categories and more.",
     "triggerLabel": "Search everything…",
+    "triggerShortLabel": "Search",
     "triggerAria": "Open command palette",
     "placeholder": "What are you looking for?",
     "groups": {
@@ -61,7 +62,8 @@
     "groupAccounts": "Accounts",
     "groupAdmin": "Administration",
     "groupAgents": "AI",
-    "agents": "Agents"
+    "agents": "Agents",
+    "aiAgents": "AI Agents"
   },
   "auth": {
     "login": "Login",
@@ -1078,6 +1080,22 @@
     "newAgent": "New agent",
     "loading": "Loading…",
     "instanceDefault": "instance default",
+    "emptyState": {
+      "tryAsking": "Try asking",
+      "connectedVia": "via",
+      "suggestions": [
+        "what's my biggest expense category this month?",
+        "show my expenses by category as a pie chart",
+        "compare my income vs expenses over the last 6 months",
+        "what was my last transaction?",
+        "how much have I spent in total this month?",
+        "which categories grew the most month over month?",
+        "summarize my spending trends and flag anything unusual",
+        "list my recurring transactions",
+        "what's my net worth right now?",
+        "how am I doing against my budgets this month?"
+      ]
+    },
     "empty": {
       "title": "No agents yet",
       "subtitle": "Create your first agent — give it a system prompt, pick a model, and start chatting with your finances.",

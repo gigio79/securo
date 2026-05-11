@@ -10,6 +10,7 @@
     "title": "Paleta de comandos",
     "description": "Busque transações, contas, categorias e muito mais.",
     "triggerLabel": "Buscar em tudo…",
+    "triggerShortLabel": "Buscar",
     "triggerAria": "Abrir paleta de comandos",
     "placeholder": "O que você está procurando?",
     "groups": {
@@ -61,7 +62,8 @@
     "groupAccounts": "Contas",
     "groupAdmin": "Administração",
     "groupAgents": "IA",
-    "agents": "Agentes"
+    "agents": "Agentes",
+    "aiAgents": "Agentes IA"
   },
   "auth": {
     "login": "Entrar",
@@ -1078,6 +1080,22 @@
     "newAgent": "Novo agente",
     "loading": "Carregando…",
     "instanceDefault": "padrão da instância",
+    "emptyState": {
+      "tryAsking": "Experimente perguntar",
+      "connectedVia": "via",
+      "suggestions": [
+        "qual minha maior categoria de gasto esse mês?",
+        "me mostra meus gastos por categoria num gráfico de pizza",
+        "compara minha receita e despesa nos últimos 6 meses",
+        "qual foi minha última transação?",
+        "quanto gastei no total esse mês?",
+        "quais categorias mais cresceram mês a mês?",
+        "resume meus padrões de gasto e aponta algo fora do comum",
+        "lista minhas transações recorrentes",
+        "qual meu patrimônio líquido agora?",
+        "como estou em relação aos meus orçamentos esse mês?"
+      ]
+    },
     "empty": {
       "title": "Nenhum agente ainda",
       "subtitle": "Crie seu primeiro agente — defina um prompt do sistema, escolha um modelo e comece a conversar com suas finanças.",

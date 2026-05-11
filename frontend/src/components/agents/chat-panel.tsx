@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { ShellLogo } from '@/components/shell-logo'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { Loader2, Send, Sparkles, AlertCircle } from 'lucide-react'
@@ -202,6 +203,21 @@ export function ChatPanel({ agent, conversationId, onConversationCreated, focusS
     // instead of pushing the input footer past the bottom of the viewport.
     <div className="flex flex-col h-full min-h-0">
       <div ref={scrollRef} onScroll={handleScroll} className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-4">
+        {/* Empty state for a fresh conversation: brand mark + a few
+            randomized suggestion chips so the user has something to
+            click instead of staring at a blank panel. Hidden once any
+            history / pending bubble / draft exists. */}
+        {(history ?? []).length === 0 && !pendingUser && !draft && (
+          <ChatEmptyState
+            agent={agent}
+            onPick={(text) => {
+              setInput(text)
+              // Defer focus so the textarea picks up the new value
+              // before we drop the caret into it.
+              requestAnimationFrame(() => inputRef.current?.focus())
+            }}
+          />
+        )}
         <HistoryView agent={agent} history={history ?? []} />
         {/* `pendingUser` is the optimistic bubble shown the instant the
             user hits send. As soon as the SSE `conversation` event fires
@@ -389,5 +405,96 @@ function HistoryView({ agent, history }: { agent: Agent; history: AgentMessage[]
           return null
         })}
     </>
+  )
+}
+
+
+/** Shown in a fresh conversation (no history, no draft). Centers the
+ *  Securo mark + agent name and surfaces ~6 randomized example prompts
+ *  pulled from i18n. Picking one fills the textarea and focuses it
+ *  (cheaper than auto-sending — gives the user a chance to tweak). */
+function ChatEmptyState({ agent, onPick }: { agent: Agent; onPick: (text: string) => void }) {
+  const { t } = useTranslation()
+
+  // Resolve the LLM connector tied to this agent so the empty state
+  // can show "Connected via X" — useful trust signal: the user knows
+  // which provider/key/model is going to handle the next message.
+  // Falls back gracefully when the agent has no connection_id (uses
+  // raw provider/model fields or instance default).
+  const { data: connections } = useQuery({
+    queryKey: ['agent-connections'],
+    queryFn: () => agents.connections.list(),
+    staleTime: 1000 * 60,
+  })
+  const connectorLabel = useMemo<string | null>(() => {
+    if (agent.connection_id) {
+      const conn = connections?.find((c) => c.id === agent.connection_id)
+      if (conn) {
+        const model = agent.model || conn.default_model
+        return model ? `${conn.name} · ${model}` : conn.name
+      }
+    }
+    if (agent.provider) {
+      return agent.model ? `${agent.provider} · ${agent.model}` : agent.provider
+    }
+    return null
+  }, [agent.connection_id, agent.provider, agent.model, connections])
+
+  // Pull the localized prompt pool. Each locale ships ~10 short tips;
+  // we shuffle and take the first 6 so reopening a fresh chat doesn't
+  // always show the same chips.
+  const allPrompts = useMemo<string[]>(() => {
+    const raw = t('agents.emptyState.suggestions', { returnObjects: true })
+    return Array.isArray(raw) ? (raw as string[]) : []
+    // Re-randomize each time the agent changes so switching agents
+    // refreshes the suggestion set too.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [t, agent.id])
+
+  const picks = useMemo(() => {
+    const pool = [...allPrompts]
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1))
+      ;[pool[i], pool[j]] = [pool[j], pool[i]]
+    }
+    return pool.slice(0, 3)
+  }, [allPrompts])
+
+  return (
+    <div className="flex flex-col items-center justify-center text-center gap-5 py-12 min-h-[65vh]">
+      {/* Brand mark — uses the primary indigo so it reads as Securo, not
+          as the agent's accent color. Transparent background. */}
+      <ShellLogo size={56} className="text-primary opacity-90" />
+      <div className="space-y-1 px-6">
+        <div className="text-base font-semibold">{agent.name}</div>
+        {agent.description && (
+          <p className="text-xs text-muted-foreground line-clamp-2">{agent.description}</p>
+        )}
+        {connectorLabel && (
+          <div className="text-[11px] text-muted-foreground/80 mt-1.5">
+            {t('agents.emptyState.connectedVia', 'via')} <span className="font-mono">{connectorLabel}</span>
+          </div>
+        )}
+      </div>
+      {picks.length > 0 && (
+        <div className="w-full px-3 mt-1">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground/80 mb-2 text-center">
+            {t('agents.emptyState.tryAsking', 'Try asking')}
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {picks.map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => onPick(p)}
+                className="text-left text-sm px-3 py-2 rounded-md border border-border bg-background/40 hover:bg-muted transition-colors"
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

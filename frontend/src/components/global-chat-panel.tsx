@@ -19,7 +19,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Dialog as DialogPrimitive } from 'radix-ui'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeft, History, Loader2, Plus, X } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { ArrowLeft, History, Loader2, Plus, Settings, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -151,7 +152,10 @@ export function GlobalChatPanel({ open, onOpenChange }: Props) {
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
           className={cn(
-            'fixed inset-0 z-50 bg-black/30',
+            // Match the command palette (⌘K) overlay: light background-
+            // tinted veil + small blur. Distinct from the heavier
+            // bg-black/30 we had before, which felt like a modal cut.
+            'fixed inset-0 z-50 backdrop-blur-[3px] bg-background/40',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
           )}
@@ -270,6 +274,20 @@ export function GlobalChatPanel({ open, onOpenChange }: Props) {
                   </Button>
                 </>
               )}
+              {/* Settings — jumps to /agents (the management page).
+                  Closing the panel after navigation so the user lands
+                  on a clean view of the agents config. */}
+              <Button
+                asChild
+                size="sm"
+                variant="ghost"
+                aria-label={t('agents.globalChat.openSettings', 'Agent settings')}
+                title={t('agents.globalChat.openSettings', 'Agent settings')}
+              >
+                <Link to="/agents" onClick={() => onOpenChange(false)}>
+                  <Settings className="h-4 w-4" />
+                </Link>
+              </Button>
               <DialogPrimitive.Close asChild>
                 <Button size="sm" variant="ghost" aria-label="Close">
                   <X className="h-4 w-4" />

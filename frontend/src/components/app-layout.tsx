@@ -188,7 +188,12 @@ export function AppLayout() {
   const versionA11yLabel = t('app.versionAriaLabel', { version: APP_VERSION })
 
   return (
-    <div className="min-h-screen bg-background">
+    // On desktop the banner is fixed at the top of the viewport — the
+    // sidebar is already offset via `top-7`, but the main content area
+    // is in normal flow, so without this padding it would scroll under
+    // the banner and clip the page headers. The mobile header gets the
+    // same offset via its own conditional `top-7` below.
+    <div className={cn('min-h-screen bg-background', demoMode && 'lg:pt-7')}>
       {/* Mobile header */}
       <header className={cn(
         'sticky z-40 flex h-14 items-center gap-3 bg-sidebar border-b border-sidebar-border px-4 lg:hidden',

@@ -1,0 +1,26 @@
+# Parallel "demo" stack override. Pair with -p securo-demo so it gets
+# its own DB volume + network, separate from the main dev stack.
+#
+# Usage:
+#   FRONTEND_PORT=3100 DEMO_MODE=true AGENTS_ENABLED=false \
+#     docker compose -p securo-demo \
+#       -f docker-compose.yml \
+#       -f docker-compose.override.yml \
+#       -f docker-compose.demo.yml up -d
+#
+# Tear-down (and wipe its DB volume):
+#   docker compose -p securo-demo -f docker-compose.yml -f docker-compose.demo.yml down -v
+services:
+  backend:
+    # !override replaces (rather than appends to) the ports list from
+    # the base compose file — without it the demo backend would try to
+    # bind both 8000 and 8100, conflicting with the main stack.
+    ports: !override
+      - "8100:8000"
+  frontend:
+    # Frontend's self-URL is hardcoded in the main compose; on the demo
+    # stack we override it to match the alt port so absolute redirects
+    # land back here instead of bouncing to the main stack on :3000.
+    environment:
+      BACKEND_URL: http://backend:8000
+      FRONTEND_URL: http://localhost:3100

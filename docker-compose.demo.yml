@@ -1,26 +1,130 @@
-# Parallel "demo" stack override. Pair with -p securo-demo so it gets
-# its own DB volume + network, separate from the main dev stack.
+# Self-contained Compose stack for the public demo at kimi.usesecuro.com.
+# Deployed by Dokploy from the `demo` branch — no overlays or external
+# compose files referenced. Builds backend + frontend from this same
+# branch so the demo-only code (DEMO_MODE flag, auto-login, banner,
+# hidden bank-connect / import) is in the image.
 #
-# Usage:
-#   FRONTEND_PORT=3100 DEMO_MODE=true AGENTS_ENABLED=false \
-#     docker compose -p securo-demo \
-#       -f docker-compose.yml \
-#       -f docker-compose.override.yml \
-#       -f docker-compose.demo.yml up -d
+# Required env on the Dokploy side:
+#   SECRET_KEY              — openssl rand -hex 32
+#   AGENTS_MCP_JWT_SECRET   — openssl rand -hex 32 (unused but pinned)
 #
-# Tear-down (and wipe its DB volume):
-#   docker compose -p securo-demo -f docker-compose.yml -f docker-compose.demo.yml down -v
+# Everything else is hardcoded for the demo profile:
+#   DEMO_MODE=true          forces the demo banner, auto-login, hides
+#                           bank-connect + import, refuses registration,
+#                           skips the Yahoo market-price refresh task.
+#   AGENTS_ENABLED=false    no AI/MCP/agents UI or routes.
+#   PLUGGY_*=               empty → no bank-sync.
+#   OPENEXCHANGERATES_APP_ID= empty → no FX-rate API calls.
+
+name: securo-demo
+
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/securo
+  SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set on the Dokploy side}
+  DEBUG: "false"
+  FRONTEND_URL: https://kimi.usesecuro.com
+  REDIS_URL: redis://redis:6379/0
+  STORAGE_LOCAL_PATH: /app/data/attachments
+
+  # Demo profile — see top-of-file comment for what each flag does.
+  DEMO_MODE: "true"
+
+  # Bank integration disabled in demo.
+  PLUGGY_CLIENT_ID: ""
+  PLUGGY_CLIENT_SECRET: ""
+  PLUGGY_OAUTH_REDIRECT_URI: https://kimi.usesecuro.com/oauth/callback
+
+  # FX provider disabled — seed_demo.py generates daily rates locally.
+  OPENEXCHANGERATES_APP_ID: ""
+  FX_SYNC_MODE: on_demand
+
+  # Agents off — no MCP server, no LLM providers, no chat UI.
+  AGENTS_ENABLED: "false"
+  AGENTS_MCP_JWT_SECRET: ${AGENTS_MCP_JWT_SECRET:-unused-in-demo}
+
+x-backend-base: &backend-base
+  build:
+    context: ./backend
+  pull_policy: build
+  environment: *backend-env
+  depends_on:
+    db: { condition: service_healthy }
+    redis: { condition: service_healthy }
+  restart: unless-stopped
+  networks:
+    - securo-demo-network
+  volumes:
+    - attachments:/app/data/attachments
+
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - securo-demo-network
+
+  db:
+    # pgvector image even though agents are off — keeps the migration
+    # path identical to prod so an `alembic upgrade head` never fails.
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: securo
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - securo-demo-network
+
   backend:
-    # !override replaces (rather than appends to) the ports list from
-    # the base compose file — without it the demo backend would try to
-    # bind both 8000 and 8100, conflicting with the main stack.
-    ports: !override
-      - "8100:8000"
+    <<: *backend-base
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    expose:
+      - "8000"
+
+  celery-worker:
+    <<: *backend-base
+    command: celery -A app.worker worker --loglevel=info --concurrency=2
+
+  celery-beat:
+    <<: *backend-base
+    command: celery -A app.worker beat --loglevel=info
+
   frontend:
-    # Frontend's self-URL is hardcoded in the main compose; on the demo
-    # stack we override it to match the alt port so absolute redirects
-    # land back here instead of bouncing to the main stack on :3000.
+    build:
+      context: ./frontend
+    pull_policy: build
+    restart: unless-stopped
     environment:
       BACKEND_URL: http://backend:8000
-      FRONTEND_URL: http://localhost:3100
+      FRONTEND_URL: https://kimi.usesecuro.com
+    depends_on:
+      - backend
+    networks:
+      - securo-demo-network
+      - dokploy-network
+    expose:
+      - "80"
+
+volumes:
+  pgdata:
+  attachments:
+
+networks:
+  securo-demo-network:
+    driver: bridge
+  # Dokploy ingress network — Traefik routes inbound HTTPS traffic for
+  # kimi.usesecuro.com through here to the frontend service.
+  dokploy-network:
+    external: true

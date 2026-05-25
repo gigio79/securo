@@ -847,7 +847,6 @@ async def test_propose_update_recurring_transaction_external_apply_writes(
     """Seed a recurring tx directly, then drive an update via apply=True."""
     from datetime import date
     from decimal import Decimal
-    from sqlalchemy import select
     from app.models.recurring_transaction import RecurringTransaction
 
     rt = RecurringTransaction(

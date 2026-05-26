@@ -21,6 +21,7 @@ from app.schemas.workspace import (
     MemberInvite,
     MemberRead,
     MemberRoleUpdate,
+    WorkspaceCreate,
     WorkspaceRead,
     WorkspaceUpdate,
 )
@@ -39,8 +40,19 @@ async def list_my_workspaces(
     session: AsyncSession = Depends(get_async_session),
     user: User = Depends(current_active_user),
 ):
-    """Return every workspace the current user belongs to, with their role."""
-    rows = await session.execute(
+    """Return every workspace the current user can access.
+
+    Unions two sets:
+      - workspaces where the user has a `workspace_members` row (role
+        comes from that row)
+      - workspaces where `workspaces.managed_by_user_id` matches the
+        user but they have no membership (role = 'manager')
+
+    A user who is both a member AND the external manager is reported
+    with their concrete membership role (not the virtual manager one)
+    since their explicit role is the more specific signal.
+    """
+    member_rows = await session.execute(
         select(Workspace, WorkspaceMember.role)
         .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
         .where(
@@ -50,11 +62,57 @@ async def list_my_workspaces(
         .order_by(Workspace.created_at.asc())
     )
     out: list[WorkspaceRead] = []
-    for ws, role in rows.all():
+    seen_ids: set[uuid.UUID] = set()
+    for ws, role in member_rows.all():
         item = WorkspaceRead.model_validate(ws)
         item.role = role
         out.append(item)
+        seen_ids.add(ws.id)
+
+    managed_rows = await session.execute(
+        select(Workspace)
+        .where(
+            Workspace.managed_by_user_id == user.id,
+            Workspace.is_archived.is_(False),
+        )
+        .order_by(Workspace.created_at.asc())
+    )
+    for ws in managed_rows.scalars().all():
+        if ws.id in seen_ids:
+            continue
+        item = WorkspaceRead.model_validate(ws)
+        item.role = "manager"
+        out.append(item)
     return out
+
+
+@router.post("", response_model=WorkspaceRead, status_code=status.HTTP_201_CREATED)
+async def create_workspace_endpoint(
+    body: WorkspaceCreate,
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user),
+):
+    """Create a new workspace; the caller becomes its manager.
+
+    Use case: a user provisioning a workspace they'll operate (either
+    for themselves as a second container, or on behalf of someone else
+    who'll be invited later as the day-to-day owner).
+    """
+    workspace = await workspace_service.create_workspace(
+        session,
+        name=body.name,
+        creator=user,
+        kind=body.kind,
+        default_currency=body.default_currency,
+        locale=body.locale,
+        icon=body.icon,
+        color=body.color,
+        self_membership=body.self_membership,
+    )
+    await session.commit()
+    item = WorkspaceRead.model_validate(workspace)
+    item.role = "owner" if body.self_membership else "manager"
+    return item
 
 
 @router.get("/current", response_model=WorkspaceRead)

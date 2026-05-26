@@ -22,6 +22,11 @@ from app.models.group import Group, GroupMember
 from app.models.transaction_split import TransactionSplit
 from app.models.group_settlement import GroupSettlement
 
+# Side-effect import: register the before_insert listener that auto-stamps
+# workspace_id from user_id on financial entities. Imported last so all
+# referenced models are loaded.
+from app.core import workspace_autostamp  # noqa: F401, E402
+
 __all__ = [
     "User",
     "Workspace",

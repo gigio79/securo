@@ -16,10 +16,15 @@ if TYPE_CHECKING:
 # visibility. New kinds get added here; the data model is identical.
 WORKSPACE_KINDS = ("personal", "freelancer", "small_business", "accountant_firm")
 
-# Roles a member can hold inside a workspace. `owner` is the billing +
-# member-management role; `editor` can read/write financial data; `viewer`
-# is read-only (the contador seat).
+# Roles a member can hold inside a workspace. `owner` is the
+# member-management + workspace-config role; `editor` can read/write
+# financial data; `viewer` is read-only.
 WORKSPACE_ROLES = ("owner", "editor", "viewer")
+
+# Virtual role surfaced when a user accesses a workspace via
+# `managed_by_user_id` rather than via a `workspace_members` row. They
+# get effective owner rights but aren't part of the member roster.
+MANAGER_VIRTUAL_ROLE = "manager"
 
 
 class Workspace(Base):
@@ -38,6 +43,15 @@ class Workspace(Base):
     # is too aggressive; archived workspaces stay in the DB until an
     # admin purge.
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Optional external administrator. When set, this user has effective
+    # owner rights in the workspace without being a member. Use case:
+    # one user provisions and operates a workspace on behalf of another
+    # (or operates several distinct workspaces side by side without
+    # being a "member" of each). Distinct from `created_by_user_id`
+    # because management can transfer while creation history stays.
+    managed_by_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     # Workspace-level defaults. Individual members can still override via
     # their own user preferences for display, but new accounts inherit
     # `default_currency` etc. from here.

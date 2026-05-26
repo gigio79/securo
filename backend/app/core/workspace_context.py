@@ -22,8 +22,10 @@ from app.core.database import get_async_session
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.services.workspace_service import (
+    _virtual_manager_member,
     get_default_workspace,
     get_membership,
+    is_workspace_manager,
 )
 
 
@@ -42,11 +44,12 @@ class WorkspaceContext:
 
     @property
     def can_write(self) -> bool:
-        return self.role in ("owner", "editor")
+        return self.role in ("owner", "editor", "manager")
 
     @property
     def is_owner(self) -> bool:
-        return self.role == "owner"
+        # Workspace managers get effective owner rights for permission gates.
+        return self.role in ("owner", "manager")
 
     def require_write(self) -> None:
         if not self.can_write:
@@ -68,20 +71,27 @@ async def current_workspace(
             ws_uuid = uuid.UUID(x_workspace_id)
         except (ValueError, TypeError):
             raise HTTPException(status_code=400, detail="Invalid X-Workspace-Id")
-        member = await get_membership(session, ws_uuid, user.id)
-        if member is None:
-            raise HTTPException(status_code=404, detail="Workspace not found")
         workspace = await session.get(Workspace, ws_uuid)
         if workspace is None or workspace.is_archived:
             raise HTTPException(status_code=404, detail="Workspace not found")
+        member = await get_membership(session, ws_uuid, user.id)
+        if member is None:
+            # Fall back to manager-of access.
+            if await is_workspace_manager(session, ws_uuid, user.id):
+                member = _virtual_manager_member(ws_uuid, user.id)
+            else:
+                raise HTTPException(status_code=404, detail="Workspace not found")
         return WorkspaceContext(workspace=workspace, member=member)
 
-    # Fallback: user's first non-archived workspace.
+    # Fallback: user's first non-archived workspace (member-of or managed).
     default = await get_default_workspace(session, user.id)
     if default is None:
         raise HTTPException(status_code=404, detail="No workspace available")
     member = await get_membership(session, default.id, user.id)
     if member is None:
-        # Should be unreachable — get_default_workspace already joined on membership.
-        raise HTTPException(status_code=500, detail="Workspace state inconsistent")
+        # Managed-only workspace path.
+        if await is_workspace_manager(session, default.id, user.id):
+            member = _virtual_manager_member(default.id, user.id)
+        else:
+            raise HTTPException(status_code=500, detail="Workspace state inconsistent")
     return WorkspaceContext(workspace=default, member=member)

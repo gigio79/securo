@@ -62,6 +62,7 @@ from app.models.credit_card_bill import CreditCardBill  # noqa: E402,F401
 from app.models.group import Group, GroupMember  # noqa: E402,F401
 from app.models.transaction_split import TransactionSplit  # noqa: E402,F401
 from app.models.group_settlement import GroupSettlement  # noqa: E402,F401
+from app.models.workspace import Workspace, WorkspaceMember  # noqa: E402,F401
 # Agent models — gated by AGENTS_ENABLED above so tests always cover them.
 from app.agents.models import (  # noqa: E402,F401
     Agent,
@@ -145,7 +146,12 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 
 @pytest_asyncio.fixture
 async def test_user(session: AsyncSession, clean_db) -> User:
-    """Create a test user."""
+    """Create a test user with an auto-created Personal workspace.
+
+    Pre-creates the workspace so the auto-stamp listener (registered on
+    the financial models) can resolve `workspace_id` from `user_id` for
+    legacy test fixtures that construct rows without setting it.
+    """
     import bcrypt as _bcrypt
 
     hashed = _bcrypt.hashpw(b"testpass123", _bcrypt.gensalt()).decode()
@@ -164,6 +170,26 @@ async def test_user(session: AsyncSession, clean_db) -> User:
         },
     )
     session.add(user)
+    await session.flush()
+
+    workspace = Workspace(
+        id=uuid.uuid4(),
+        name="Pessoal",
+        kind="personal",
+        created_by_user_id=user.id,
+        default_currency="BRL",
+        locale="pt-BR",
+    )
+    session.add(workspace)
+    await session.flush()
+    session.add(
+        WorkspaceMember(
+            id=uuid.uuid4(),
+            workspace_id=workspace.id,
+            user_id=user.id,
+            role="owner",
+        )
+    )
     await session.commit()
     await session.refresh(user)
     return user

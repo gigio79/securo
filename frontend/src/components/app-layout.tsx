@@ -516,6 +516,13 @@ export function AppLayout() {
                   </>
                 )}
                 <DropdownMenuItem
+                  onClick={() => navigate('/workspace/settings')}
+                  className="flex items-center gap-2"
+                >
+                  <Users size={14} />
+                  {t('workspace.settingsMenu', 'Workspace')}
+                </DropdownMenuItem>
+                <DropdownMenuItem
                   onClick={() => setChangePasswordOpen(true)}
                   className="flex items-center gap-2"
                 >

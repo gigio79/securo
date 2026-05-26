@@ -24,13 +24,31 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Check, ChevronsUpDown, Plus, Briefcase, User as UserIcon, Settings } from 'lucide-react'
+import { Check, ChevronsUpDown, Plus, Settings } from 'lucide-react'
+import { CategoryIcon } from '@/components/category-icon'
+import type { Workspace } from '@/types'
 
 const ROLE_BADGE: Record<string, string> = {
   owner: 'owner',
   editor: 'editor',
   viewer: 'viewer',
   manager: 'manager',
+}
+
+// Fallbacks when a workspace hasn't set its own icon/color yet.
+const DEFAULT_ICON_BY_KIND: Record<string, string> = {
+  personal: 'user',
+  freelancer: 'briefcase',
+  small_business: 'building-2',
+  accountant_firm: 'landmark',
+}
+const DEFAULT_COLOR = '#6366F1'
+
+function workspaceIcon(w: Workspace): string {
+  return w.icon || DEFAULT_ICON_BY_KIND[w.kind] || 'briefcase'
+}
+function workspaceColor(w: Workspace): string {
+  return w.color || DEFAULT_COLOR
 }
 
 export function WorkspaceSwitcher() {
@@ -74,9 +92,12 @@ export function WorkspaceSwitcher() {
         onClick={() => navigate('/workspace/settings')}
         className="flex items-center gap-3 w-full rounded-lg px-3 py-2.5 text-sm hover:bg-sidebar-accent transition-colors text-left"
       >
-        <div className="h-7 w-7 shrink-0 rounded-md bg-primary/15 flex items-center justify-center text-primary">
-          {current.kind === 'personal' ? <UserIcon size={14} /> : <Briefcase size={14} />}
-        </div>
+        <CategoryIcon
+          icon={workspaceIcon(current)}
+          color={workspaceColor(current)}
+          size="sm"
+          className="shrink-0"
+        />
         <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold truncate">{current.name}</p>
           <p className="text-[10px] text-sidebar-muted/70 truncate">
@@ -93,9 +114,12 @@ export function WorkspaceSwitcher() {
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button className="flex items-center gap-3 w-full rounded-lg px-3 py-2.5 text-sm hover:bg-sidebar-accent transition-colors text-left">
-            <div className="h-7 w-7 shrink-0 rounded-md bg-primary/15 flex items-center justify-center text-primary">
-              {current.kind === 'personal' ? <UserIcon size={14} /> : <Briefcase size={14} />}
-            </div>
+            <CategoryIcon
+              icon={workspaceIcon(current)}
+              color={workspaceColor(current)}
+              size="sm"
+              className="shrink-0"
+            />
             <div className="flex-1 min-w-0">
               <p className="text-xs font-semibold truncate">{current.name}</p>
               <p className="text-[10px] text-sidebar-muted/70 truncate">
@@ -117,9 +141,12 @@ export function WorkspaceSwitcher() {
                 onClick={() => void switchWorkspace(w.id)}
                 className="flex items-center gap-2"
               >
-                <div className="h-5 w-5 shrink-0 rounded-sm bg-primary/12 flex items-center justify-center text-primary">
-                  {w.kind === 'personal' ? <UserIcon size={11} /> : <Briefcase size={11} />}
-                </div>
+                <CategoryIcon
+                  icon={workspaceIcon(w)}
+                  color={workspaceColor(w)}
+                  size="sm"
+                  className="shrink-0"
+                />
                 <span className="flex-1 truncate">{w.name}</span>
                 <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
                   {w.role && ROLE_BADGE[w.role]}

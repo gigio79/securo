@@ -79,11 +79,43 @@ def _resolve_workspace_for_user(session: Session, user_id: uuid.UUID) -> uuid.UU
     return row[0] if row else None
 
 
+# Parent FK columns to consult in order — when a row's workspace_id is
+# missing, look up the parent and inherit its workspace_id. Order
+# matters: more specific parents come first.
+_PARENT_LOOKUPS: tuple[tuple[str, str], ...] = (
+    ("account_id", "app.models.account:Account"),
+    ("connection_id", "app.models.bank_connection:BankConnection"),
+    ("asset_id", "app.models.asset:Asset"),
+    ("group_id", "app.models.group:Group"),
+    ("transaction_id", "app.models.transaction:Transaction"),
+)
+
+
+def _import_model(spec: str) -> Any:
+    module_path, class_name = spec.split(":")
+    import importlib
+
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)
+
+
+def _resolve_from_parent(session: Session, target: Any) -> uuid.UUID | None:
+    """Walk parent FKs and return the first workspace_id we find."""
+    for column, spec in _PARENT_LOOKUPS:
+        parent_id = getattr(target, column, None)
+        if parent_id is None:
+            continue
+        ParentModel = _import_model(spec)
+        parent = session.get(ParentModel, parent_id)
+        if parent is not None:
+            ws = getattr(parent, "workspace_id", None)
+            if ws is not None:
+                return ws
+    return None
+
+
 def _before_insert(mapper: Mapper, connection: Any, target: Any) -> None:
     if getattr(target, "workspace_id", None) is not None:
-        return
-    user_id = getattr(target, "user_id", None)
-    if user_id is None:
         return
     # Use the sync session bound to this connection. Mapper events fire
     # inside a flush, so the session is reachable via the target's
@@ -91,6 +123,21 @@ def _before_insert(mapper: Mapper, connection: Any, target: Any) -> None:
     from sqlalchemy.orm import object_session
     session = object_session(target)
     if session is None:
+        return
+
+    # Prefer the parent's workspace — this keeps synced rows in the
+    # workspace that owns the bank connection / account / asset, which
+    # may not be the user's *default* workspace.
+    parent_ws = _resolve_from_parent(session, target)
+    if parent_ws is not None:
+        target.workspace_id = parent_ws
+        return
+
+    # Fallback: route the row to the user's first workspace. Correct
+    # for single-workspace users (everyone today) and a safe default
+    # for orphan-shaped rows.
+    user_id = getattr(target, "user_id", None)
+    if user_id is None:
         return
     cache_key = _cache_key(session, user_id)
     ws_id = getattr(session, cache_key, None)

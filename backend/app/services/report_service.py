@@ -406,6 +406,7 @@ async def get_income_expenses_report(
         .join(Transaction, _TS_.transaction_id == Transaction.id)
         .where(
             Transaction.user_id == user_id,
+            Transaction.workspace_id == workspace_id,
             _TS_.group_member_id.notin_(own_member_ids_sq),
             report_date >= start,
             report_date <= today,
@@ -441,8 +442,11 @@ async def get_income_expenses_report(
     from app.models.group import GroupMember
     from app.models.transaction_split import TransactionSplit
 
+    # Exclude is_self memberships — the owner's own self-member must
+    # not surface their in-Pessoal transactions in Trabalho's report.
     viewer_member_ids = select(GroupMember.id).where(
-        GroupMember.linked_user_id == user_id
+        GroupMember.linked_user_id == user_id,
+        GroupMember.is_self.is_(False),
     )
     shared_result = await session.execute(
         select(
@@ -466,6 +470,7 @@ async def get_income_expenses_report(
         .where(
             TransactionSplit.group_member_id.in_(viewer_member_ids),
             Transaction.user_id != user_id,
+            Transaction.workspace_id != workspace_id,
             report_date >= start,
             report_date <= today,
             Transaction.source != "opening_balance",
@@ -699,6 +704,7 @@ async def get_income_expenses_report(
         .join(Transaction, _TS_.transaction_id == Transaction.id)
         .where(
             Transaction.user_id == user_id,
+            Transaction.workspace_id == workspace_id,
             Transaction.type == "debit",
             _TS_.group_member_id.notin_(own_member_ids_sq),
             report_date >= start,

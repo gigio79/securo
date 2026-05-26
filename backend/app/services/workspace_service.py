@@ -9,7 +9,7 @@ import uuid
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
@@ -317,6 +317,72 @@ async def update_member_role(
     member.role = new_role
     await session.flush()
     return member
+
+
+async def get_workspace_stats(
+    session: AsyncSession, workspace_id: uuid.UUID
+) -> dict:
+    """Counts surfaced on the settings page header strip."""
+    from sqlalchemy import func
+
+    from app.models.account import Account
+    from app.models.transaction import Transaction
+
+    members_q = await session.execute(
+        select(func.count(WorkspaceMember.id)).where(
+            WorkspaceMember.workspace_id == workspace_id
+        )
+    )
+    accounts_q = await session.execute(
+        select(func.count(Account.id)).where(Account.workspace_id == workspace_id)
+    )
+    transactions_q = await session.execute(
+        select(func.count(Transaction.id)).where(
+            Transaction.workspace_id == workspace_id
+        )
+    )
+    return {
+        "members": int(members_q.scalar() or 0),
+        "accounts": int(accounts_q.scalar() or 0),
+        "transactions": int(transactions_q.scalar() or 0),
+    }
+
+
+async def archive_workspace(
+    session: AsyncSession, workspace_id: uuid.UUID, requester_id: uuid.UUID
+) -> Workspace:
+    """Soft-delete: flip is_archived. Refuses to archive the requester's
+    LAST accessible workspace (they'd be locked out)."""
+    workspace = await session.get(Workspace, workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    if workspace.is_archived:
+        return workspace
+    # Count this user's other workspaces (member OR manager).
+    other_member = await session.execute(
+        select(func.count(WorkspaceMember.id))
+        .join(Workspace, Workspace.id == WorkspaceMember.workspace_id)
+        .where(
+            WorkspaceMember.user_id == requester_id,
+            WorkspaceMember.workspace_id != workspace_id,
+            Workspace.is_archived.is_(False),
+        )
+    )
+    other_managed = await session.execute(
+        select(func.count(Workspace.id)).where(
+            Workspace.managed_by_user_id == requester_id,
+            Workspace.id != workspace_id,
+            Workspace.is_archived.is_(False),
+        )
+    )
+    if int(other_member.scalar() or 0) + int(other_managed.scalar() or 0) == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot archive your last workspace",
+        )
+    workspace.is_archived = True
+    await session.flush()
+    return workspace
 
 
 async def remove_member(

@@ -121,6 +121,14 @@ export const workspaces = {
   removeMember: async (id: string, memberUserId: string): Promise<void> => {
     await api.delete(`/workspaces/${id}/members/${memberUserId}`)
   },
+  stats: async (id: string): Promise<{ members: number; accounts: number; transactions: number }> => {
+    const { data } = await api.get(`/workspaces/${id}/stats`)
+    return data
+  },
+  archive: async (id: string): Promise<Workspace> => {
+    const { data } = await api.post(`/workspaces/${id}/archive`)
+    return data
+  },
 }
 
 // Setup

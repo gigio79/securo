@@ -258,6 +258,35 @@ async def change_member_role(
     )
 
 
+@router.get("/{workspace_id}/stats")
+async def workspace_stats(
+    workspace_id: uuid.UUID,
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user),
+):
+    """KPIs surfaced on the settings page (members / accounts / transactions)."""
+    await workspace_service.require_membership(session, workspace_id, user.id)
+    return await workspace_service.get_workspace_stats(session, workspace_id)
+
+
+@router.post("/{workspace_id}/archive", response_model=WorkspaceRead)
+async def archive_workspace_endpoint(
+    workspace_id: uuid.UUID,
+    session: AsyncSession = Depends(get_async_session),
+    user: User = Depends(current_active_user),
+):
+    """Soft-delete: flips is_archived. Requires owner role. Refuses to
+    archive the requester's last accessible workspace."""
+    await workspace_service.require_membership(
+        session, workspace_id, user.id, min_role="owner"
+    )
+    workspace = await workspace_service.archive_workspace(session, workspace_id, user.id)
+    await session.commit()
+    item = WorkspaceRead.model_validate(workspace)
+    item.role = "owner"
+    return item
+
+
 @router.delete(
     "/{workspace_id}/members/{member_user_id}",
     status_code=status.HTTP_204_NO_CONTENT,

@@ -45,7 +45,18 @@
     "createTitle": "Novo workspace",
     "createDescription": "Um workspace contém suas próprias contas, categorias, orçamentos e metas. Você pode convidar pessoas pela página de configurações do workspace.",
     "createSuccess": "Workspace criado",
-    "createPlaceholder": "ex.: Projeto pessoal, Família"
+    "createPlaceholder": "ex.: Projeto pessoal, Família",
+    "icon": "Ícone",
+    "statAccounts": "Contas",
+    "statTransactions": "Transações",
+    "statCreatedAt": "Criado em",
+    "dangerZone": "Zona de perigo",
+    "archive": "Arquivar",
+    "archiveAction": "Arquivar workspace",
+    "archiveHint": "O workspace fica oculto da lista e do switcher. Os dados continuam preservados.",
+    "archiveSuccess": "Workspace arquivado",
+    "archiveConfirmTitle": "Arquivar workspace?",
+    "archiveConfirmDescription": "O workspace \"{{name}}\" será removido da sua lista. Os dados ficam preservados e um admin pode restaurar mais tarde."
   },
   "app": {
     "name": "Securo",

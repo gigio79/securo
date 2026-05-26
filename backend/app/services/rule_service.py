@@ -521,7 +521,12 @@ async def _get_existing_rule_names(session: AsyncSession, user_id: uuid.UUID) ->
     return {row[0] for row in result.all()}
 
 
-async def create_default_rules(session: AsyncSession, user_id: uuid.UUID, lang: str = "pt-BR") -> list[Rule]:
+async def create_default_rules(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    lang: str = "pt-BR",
+    workspace_id: Optional[uuid.UUID] = None,
+) -> list[Rule]:
     """Create universal default categorization rules for a new user.
 
     `lang` is accepted for backwards compatibility but no longer affects
@@ -538,6 +543,7 @@ async def create_default_rules(session: AsyncSession, user_id: uuid.UUID, lang: 
     for rule_data in resolved:
         rule = Rule(
             user_id=user_id,
+            workspace_id=workspace_id,
             name=rule_data["name"],
             conditions_op=rule_data["conditions_op"],
             conditions=rule_data["conditions"],

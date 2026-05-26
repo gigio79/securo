@@ -34,7 +34,12 @@ DEFAULT_CATEGORIES_I18N = {
 }
 
 
-async def create_default_categories(session: AsyncSession, user_id: uuid.UUID, lang: str = "pt-BR") -> list[Category]:
+async def create_default_categories(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    lang: str = "pt-BR",
+    workspace_id: Optional[uuid.UUID] = None,
+) -> list[Category]:
     # Guard against double-creation (race between categories and groups endpoints)
     existing = await session.execute(
         select(Category).where(Category.user_id == user_id).limit(1)
@@ -43,7 +48,7 @@ async def create_default_categories(session: AsyncSession, user_id: uuid.UUID, l
         return await get_categories(session, user_id)
 
     # Create default groups first
-    groups = await create_default_groups(session, user_id, lang)
+    groups = await create_default_groups(session, user_id, lang, workspace_id=workspace_id)
 
     categories = []
     for key, data in DEFAULT_CATEGORIES_I18N.items():
@@ -52,6 +57,7 @@ async def create_default_categories(session: AsyncSession, user_id: uuid.UUID, l
         group = groups.get(group_key) if group_key else None
         category = Category(
             user_id=user_id,
+            workspace_id=workspace_id,
             name=name,
             icon=data["icon"],
             color=data["color"],

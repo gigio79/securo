@@ -47,13 +47,19 @@ def _resolve_group_name(key: str, lang: str) -> str:
     return entry.get(lang, entry.get("en", key))
 
 
-async def create_default_groups(session: AsyncSession, user_id: uuid.UUID, lang: str = "pt-BR") -> dict[str, CategoryGroup]:
+async def create_default_groups(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    lang: str = "pt-BR",
+    workspace_id: Optional[uuid.UUID] = None,
+) -> dict[str, CategoryGroup]:
     """Create default category groups for a user. Returns dict of internal_key -> group. Uses flush (not commit)."""
     groups = {}
     for key, data in DEFAULT_GROUPS_I18N.items():
         name = data.get(lang, data.get("en", key))
         group = CategoryGroup(
             user_id=user_id,
+            workspace_id=workspace_id,
             name=name,
             icon=data["icon"],
             color=data["color"],

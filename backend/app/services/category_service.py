@@ -45,7 +45,19 @@ async def create_default_categories(
         select(Category).where(Category.user_id == user_id).limit(1)
     )
     if existing.scalar_one_or_none():
-        return await get_categories(session, user_id)
+        # Re-query by workspace when available — falls back to the user's
+        # first workspace via autostamp resolution in tests/legacy callers.
+        scope_id = workspace_id
+        if scope_id is None:
+            from app.models.workspace import Workspace, WorkspaceMember
+            row = await session.execute(
+                select(Workspace.id)
+                .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
+                .where(WorkspaceMember.user_id == user_id)
+                .limit(1)
+            )
+            scope_id = row.scalar()
+        return await get_categories(session, scope_id) if scope_id else []
 
     # Create default groups first
     groups = await create_default_groups(session, user_id, lang, workspace_id=workspace_id)
@@ -71,22 +83,33 @@ async def create_default_categories(
     return categories
 
 
-async def get_categories(session: AsyncSession, user_id: uuid.UUID) -> list[Category]:
+async def get_categories(session: AsyncSession, workspace_id: uuid.UUID) -> list[Category]:
     result = await session.execute(
-        select(Category).where(Category.user_id == user_id).order_by(Category.is_system.desc(), Category.name)
+        select(Category)
+        .where(Category.workspace_id == workspace_id)
+        .order_by(Category.is_system.desc(), Category.name)
     )
     return list(result.scalars().all())
 
 
-async def get_category(session: AsyncSession, category_id: uuid.UUID, user_id: uuid.UUID) -> Optional[Category]:
+async def get_category(
+    session: AsyncSession, category_id: uuid.UUID, workspace_id: uuid.UUID
+) -> Optional[Category]:
     result = await session.execute(
-        select(Category).where(Category.id == category_id, Category.user_id == user_id)
+        select(Category).where(
+            Category.id == category_id, Category.workspace_id == workspace_id
+        )
     )
     return result.scalar_one_or_none()
 
 
-async def create_category(session: AsyncSession, user_id: uuid.UUID, data: CategoryCreate) -> Category:
-    category = Category(user_id=user_id, **data.model_dump())
+async def create_category(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    data: CategoryCreate,
+) -> Category:
+    category = Category(user_id=user_id, workspace_id=workspace_id, **data.model_dump())
     session.add(category)
     await session.commit()
     await session.refresh(category)
@@ -94,9 +117,12 @@ async def create_category(session: AsyncSession, user_id: uuid.UUID, data: Categ
 
 
 async def update_category(
-    session: AsyncSession, category_id: uuid.UUID, user_id: uuid.UUID, data: CategoryUpdate
+    session: AsyncSession,
+    category_id: uuid.UUID,
+    workspace_id: uuid.UUID,
+    data: CategoryUpdate,
 ) -> Optional[Category]:
-    category = await get_category(session, category_id, user_id)
+    category = await get_category(session, category_id, workspace_id)
     if not category:
         return None
 
@@ -108,8 +134,10 @@ async def update_category(
     return category
 
 
-async def delete_category(session: AsyncSession, category_id: uuid.UUID, user_id: uuid.UUID) -> bool:
-    category = await get_category(session, category_id, user_id)
+async def delete_category(
+    session: AsyncSession, category_id: uuid.UUID, workspace_id: uuid.UUID
+) -> bool:
+    category = await get_category(session, category_id, workspace_id)
     if not category or category.is_system:
         return False
 

@@ -33,10 +33,16 @@ from app.services.workspace_service import (
 class WorkspaceContext:
     workspace: Workspace
     member: WorkspaceMember
+    user: User
 
     @property
     def id(self) -> uuid.UUID:
         return self.workspace.id
+
+    @property
+    def user_id(self) -> uuid.UUID:
+        """The current human's user_id — used as `created_by` on new rows."""
+        return self.user.id
 
     @property
     def role(self) -> str:
@@ -81,7 +87,7 @@ async def current_workspace(
                 member = _virtual_manager_member(ws_uuid, user.id)
             else:
                 raise HTTPException(status_code=404, detail="Workspace not found")
-        return WorkspaceContext(workspace=workspace, member=member)
+        return WorkspaceContext(workspace=workspace, member=member, user=user)
 
     # Fallback: user's first non-archived workspace (member-of or managed).
     default = await get_default_workspace(session, user.id)
@@ -94,4 +100,12 @@ async def current_workspace(
             member = _virtual_manager_member(default.id, user.id)
         else:
             raise HTTPException(status_code=500, detail="Workspace state inconsistent")
-    return WorkspaceContext(workspace=default, member=member)
+    return WorkspaceContext(workspace=default, member=member, user=user)
+
+
+# Convenience: write-gated context. Raises 403 if the user can't write.
+async def current_writable_workspace(
+    ctx: WorkspaceContext = Depends(current_workspace),
+) -> WorkspaceContext:
+    ctx.require_write()
+    return ctx

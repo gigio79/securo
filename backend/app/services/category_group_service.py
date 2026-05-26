@@ -72,36 +72,41 @@ async def create_default_groups(
     return groups
 
 
-async def get_groups(session: AsyncSession, user_id: uuid.UUID) -> list[CategoryGroup]:
+async def get_groups(session: AsyncSession, workspace_id: uuid.UUID) -> list[CategoryGroup]:
     result = await session.execute(
         select(CategoryGroup)
-        .where(CategoryGroup.user_id == user_id)
+        .where(CategoryGroup.workspace_id == workspace_id)
         .options(selectinload(CategoryGroup.categories))
         .order_by(CategoryGroup.position)
     )
     return list(result.scalars().all())
 
 
-async def get_group(session: AsyncSession, group_id: uuid.UUID, user_id: uuid.UUID) -> Optional[CategoryGroup]:
+async def get_group(session: AsyncSession, group_id: uuid.UUID, workspace_id: uuid.UUID) -> Optional[CategoryGroup]:
     result = await session.execute(
         select(CategoryGroup)
-        .where(CategoryGroup.id == group_id, CategoryGroup.user_id == user_id)
+        .where(CategoryGroup.id == group_id, CategoryGroup.workspace_id == workspace_id)
         .options(selectinload(CategoryGroup.categories))
     )
     return result.scalar_one_or_none()
 
 
-async def create_group(session: AsyncSession, user_id: uuid.UUID, data: CategoryGroupCreate) -> CategoryGroup:
-    group = CategoryGroup(user_id=user_id, **data.model_dump())
+async def create_group(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    data: CategoryGroupCreate,
+) -> CategoryGroup:
+    group = CategoryGroup(user_id=user_id, workspace_id=workspace_id, **data.model_dump())
     session.add(group)
     await session.commit()
-    return await get_group(session, group.id, user_id)
+    return await get_group(session, group.id, workspace_id)
 
 
 async def update_group(
-    session: AsyncSession, group_id: uuid.UUID, user_id: uuid.UUID, data: CategoryGroupUpdate
+    session: AsyncSession, group_id: uuid.UUID, workspace_id: uuid.UUID, data: CategoryGroupUpdate
 ) -> Optional[CategoryGroup]:
-    group = await get_group(session, group_id, user_id)
+    group = await get_group(session, group_id, workspace_id)
     if not group:
         return None
 
@@ -109,11 +114,11 @@ async def update_group(
         setattr(group, key, value)
 
     await session.commit()
-    return await get_group(session, group_id, user_id)
+    return await get_group(session, group_id, workspace_id)
 
 
-async def delete_group(session: AsyncSession, group_id: uuid.UUID, user_id: uuid.UUID) -> bool:
-    group = await get_group(session, group_id, user_id)
+async def delete_group(session: AsyncSession, group_id: uuid.UUID, workspace_id: uuid.UUID) -> bool:
+    group = await get_group(session, group_id, workspace_id)
     if not group or group.is_system:
         return False
 

@@ -740,29 +740,35 @@ async def get_installed_packs(session: AsyncSession, user_id: uuid.UUID) -> dict
     return result
 
 
-async def get_rules(session: AsyncSession, user_id: uuid.UUID) -> list[Rule]:
+async def get_rules(session: AsyncSession, workspace_id: uuid.UUID) -> list[Rule]:
     result = await session.execute(
         select(Rule)
-        .where(Rule.user_id == user_id)
+        .where(Rule.workspace_id == workspace_id)
         .order_by(Rule.priority, Rule.id)
     )
     return list(result.scalars().all())
 
 
-async def get_rule(session: AsyncSession, rule_id: uuid.UUID, user_id: uuid.UUID) -> Optional[Rule]:
+async def get_rule(session: AsyncSession, rule_id: uuid.UUID, workspace_id: uuid.UUID) -> Optional[Rule]:
     result = await session.execute(
-        select(Rule).where(Rule.id == rule_id, Rule.user_id == user_id)
+        select(Rule).where(Rule.id == rule_id, Rule.workspace_id == workspace_id)
     )
     return result.scalar_one_or_none()
 
 
-async def create_rule(session: AsyncSession, user_id: uuid.UUID, data: RuleCreate) -> Rule:
-    existing_names = await _get_existing_rule_names(session, user_id)
+async def create_rule(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    user_id: uuid.UUID,
+    data: RuleCreate,
+) -> Rule:
+    existing_names = await _get_existing_rule_names_for_workspace(session, workspace_id)
     if data.name in existing_names:
         raise DuplicateRuleError(f"A rule named '{data.name}' already exists")
 
     rule = Rule(
         user_id=user_id,
+        workspace_id=workspace_id,
         name=data.name,
         conditions_op=data.conditions_op,
         conditions=[c.model_dump() for c in data.conditions],
@@ -777,16 +783,16 @@ async def create_rule(session: AsyncSession, user_id: uuid.UUID, data: RuleCreat
 
 
 async def update_rule(
-    session: AsyncSession, rule_id: uuid.UUID, user_id: uuid.UUID, data: RuleUpdate
+    session: AsyncSession, rule_id: uuid.UUID, workspace_id: uuid.UUID, data: RuleUpdate
 ) -> Optional[Rule]:
-    rule = await get_rule(session, rule_id, user_id)
+    rule = await get_rule(session, rule_id, workspace_id)
     if not rule:
         return None
 
     update_data = data.model_dump(exclude_unset=True)
 
     if "name" in update_data and update_data["name"] != rule.name:
-        existing_names = await _get_existing_rule_names(session, user_id)
+        existing_names = await _get_existing_rule_names_for_workspace(session, workspace_id)
         if update_data["name"] in existing_names:
             raise DuplicateRuleError(f"A rule named '{update_data['name']}' already exists")
 
@@ -803,8 +809,8 @@ async def update_rule(
     return rule
 
 
-async def delete_rule(session: AsyncSession, rule_id: uuid.UUID, user_id: uuid.UUID) -> bool:
-    rule = await get_rule(session, rule_id, user_id)
+async def delete_rule(session: AsyncSession, rule_id: uuid.UUID, workspace_id: uuid.UUID) -> bool:
+    rule = await get_rule(session, rule_id, workspace_id)
     if not rule:
         return False
     await session.delete(rule)
@@ -812,14 +818,33 @@ async def delete_rule(session: AsyncSession, rule_id: uuid.UUID, user_id: uuid.U
     return True
 
 
+async def _get_existing_rule_names_for_workspace(
+    session: AsyncSession, workspace_id: uuid.UUID
+) -> set[str]:
+    """Get the set of existing rule names in a workspace."""
+    result = await session.execute(
+        select(Rule.name).where(Rule.workspace_id == workspace_id)
+    )
+    return {row[0] for row in result.all()}
+
+
 async def apply_rules_to_transaction(
     session: AsyncSession, user_id: uuid.UUID, transaction: Transaction,
     skip_category_rules: bool = False,
 ) -> None:
-    """Apply all active rules to a transaction, modifying it in-place. Commits nothing."""
+    """Apply all active rules to a transaction, modifying it in-place. Commits nothing.
+
+    `user_id` is kept for backwards-compatibility with sync/import callers that
+    haven't been migrated to pass workspace_id directly; rules are scoped by
+    workspace via the transaction's own workspace_id when available, falling
+    back to the legacy user filter so historical rows still match.
+    """
+    rule_filter = Rule.user_id == user_id
+    if getattr(transaction, "workspace_id", None) is not None:
+        rule_filter = Rule.workspace_id == transaction.workspace_id
     result = await session.execute(
         select(Rule)
-        .where(Rule.user_id == user_id, Rule.is_active == True)
+        .where(rule_filter, Rule.is_active == True)
         .order_by(Rule.priority, Rule.id)
     )
     rules = result.scalars().all()
@@ -833,9 +858,8 @@ async def apply_rules_to_transaction(
             category_set = apply_rule_actions(actions, transaction, category_set)
 
 
-async def apply_all_rules(session: AsyncSession, user_id: uuid.UUID) -> int:
-    """Re-apply all active rules to all user transactions. Returns count of affected transactions."""
-    from sqlalchemy import or_
+async def apply_all_rules(session: AsyncSession, workspace_id: uuid.UUID) -> int:
+    """Re-apply all active rules to all workspace transactions. Returns count of affected transactions."""
     from app.models.account import Account
     from app.models.bank_connection import BankConnection
 
@@ -844,10 +868,7 @@ async def apply_all_rules(session: AsyncSession, user_id: uuid.UUID) -> int:
         .outerjoin(Account)
         .outerjoin(BankConnection)
         .where(
-            or_(
-                Transaction.user_id == user_id,
-                BankConnection.user_id == user_id,
-            ),
+            Transaction.workspace_id == workspace_id,
             Transaction.source != "opening_balance",
         )
     )
@@ -855,7 +876,7 @@ async def apply_all_rules(session: AsyncSession, user_id: uuid.UUID) -> int:
 
     rules_result = await session.execute(
         select(Rule)
-        .where(Rule.user_id == user_id, Rule.is_active == True)
+        .where(Rule.workspace_id == workspace_id, Rule.is_active == True)
         .order_by(Rule.priority, Rule.id)
     )
     rules = rules_result.scalars().all()

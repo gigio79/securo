@@ -37,22 +37,23 @@ CATEGORY_TREND_TOP_N = 11
 
 
 async def _asset_value_at(
-    session: AsyncSession, user_id: uuid.UUID, cutoff: date,
+    session: AsyncSession, workspace_id: uuid.UUID, cutoff: date,
     primary_currency: str = "USD",
 ) -> float:
     """Sum of all active asset values at a given date, converted to primary currency."""
     _, total = await get_asset_values_at(
-        session, user_id, as_of_date=cutoff, primary_currency=primary_currency
+        session, workspace_id, as_of_date=cutoff,
+        primary_currency=primary_currency, by_workspace=True,
     )
     return total
 
 
 async def _net_worth_at(
-    session: AsyncSession, user_id: uuid.UUID, cutoff: date,
+    session: AsyncSession, workspace_id: uuid.UUID, cutoff: date,
     primary_currency: str = "USD",
 ) -> ReportDataPoint:
     """Compute a single net worth snapshot at a given date, converted to primary currency."""
-    accounts = await _get_open_accounts(session, user_id)
+    accounts = await _get_open_accounts(session, workspace_id)
 
     accounts_total = 0.0
     liabilities_total = 0.0
@@ -72,7 +73,7 @@ async def _net_worth_at(
             else:
                 accounts_total += converted_val
 
-    assets_total = await _asset_value_at(session, user_id, cutoff, primary_currency)
+    assets_total = await _asset_value_at(session, workspace_id, cutoff, primary_currency)
     net_worth = accounts_total + assets_total - liabilities_total
 
     return ReportDataPoint(
@@ -147,6 +148,7 @@ def _date_points(
 
 async def get_net_worth_report(
     session: AsyncSession,
+    workspace_id: uuid.UUID,
     user_id: uuid.UUID,
     months: int = 12,
     interval: str = "monthly",
@@ -166,7 +168,7 @@ async def get_net_worth_report(
     # Compute snapshot at each date point
     trend: list[ReportDataPoint] = []
     for point in points:
-        dp = await _net_worth_at(session, user_id, point, primary_currency)
+        dp = await _net_worth_at(session, workspace_id, point, primary_currency)
         dp.date = _format_date_label(point, interval)
         trend.append(dp)
 
@@ -174,7 +176,7 @@ async def get_net_worth_report(
     current = trend[-1] if trend else ReportDataPoint(
         date="", value=0, breakdowns={"accounts": 0, "assets": 0, "liabilities": 0}
     )
-    baseline = await _net_worth_at(session, user_id, start, primary_currency)
+    baseline = await _net_worth_at(session, workspace_id, start, primary_currency)
     previous = baseline if trend else current
 
     change_amount = current.value - previous.value
@@ -233,7 +235,7 @@ async def get_net_worth_report(
         "other": "#6B7280",
     }
     composition: list[ReportCompositionItem] = []
-    accounts = await _get_open_accounts(session, user_id)
+    accounts = await _get_open_accounts(session, workspace_id)
     for account in accounts:
         bal = await _account_balance_at(session, account, today)
         converted, _ = await convert(
@@ -258,10 +260,10 @@ async def get_net_worth_report(
                     group="accounts",
                 ))
 
-    # Assets
+    # Assets — scoped to workspace
     asset_result = await session.execute(
         select(Asset).where(
-            Asset.user_id == user_id,
+            Asset.workspace_id == workspace_id,
             Asset.is_archived == False,
             Asset.sell_date.is_(None),
         )
@@ -316,6 +318,7 @@ def _interval_label_expr(interval: str, date_col=None):
 
 async def get_income_expenses_report(
     session: AsyncSession,
+    workspace_id: uuid.UUID,
     user_id: uuid.UUID,
     months: int = 12,
     interval: str = "monthly",
@@ -347,7 +350,7 @@ async def get_income_expenses_report(
         )
         .join(Account, Transaction.account_id == Account.id)
         .where(
-            Transaction.user_id == user_id,
+            Transaction.workspace_id == workspace_id,
             Account.is_closed == False,
             report_date >= start,
             report_date <= today,
@@ -497,7 +500,7 @@ async def get_income_expenses_report(
     cursor = start
     while cursor <= today:
         m_start, m_end = _month_range(cursor)
-        projections = await _get_recurring_projections(session, user_id, m_start, m_end)
+        projections = await _get_recurring_projections(session, workspace_id, m_start, m_end)
         for proj in projections:
             # Convert to primary currency
             converted, _ = await fx_convert(
@@ -595,7 +598,7 @@ async def get_income_expenses_report(
         .join(Account, Transaction.account_id == Account.id)
         .outerjoin(Category, Transaction.category_id == Category.id)
         .where(
-            Transaction.user_id == user_id,
+            Transaction.workspace_id == workspace_id,
             Account.is_closed == False,
             report_date >= start,
             report_date <= today,
@@ -651,7 +654,7 @@ async def get_income_expenses_report(
         .join(Account, Transaction.account_id == Account.id)
         .outerjoin(Category, Transaction.category_id == Category.id)
         .where(
-            Transaction.user_id == user_id,
+            Transaction.workspace_id == workspace_id,
             Account.is_closed == False,
             report_date >= start,
             report_date <= today,
@@ -731,7 +734,7 @@ async def get_income_expenses_report(
     cursor2 = start
     while cursor2 <= today:
         m_start, m_end = _month_range(cursor2)
-        projections = await _get_recurring_projections(session, user_id, m_start, m_end)
+        projections = await _get_recurring_projections(session, workspace_id, m_start, m_end)
         period_label = _format_date_label(cursor2, interval)
         for proj in projections:
             cat_id_str = str(proj["category_id"]) if proj["category_id"] else "uncategorized"
@@ -875,7 +878,7 @@ _PAST_HISTORY_MONTHS = 1
 
 async def _get_baseline_projection(
     session: AsyncSession,
-    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     today: date,
     end: date,
     primary_currency: str,
@@ -907,7 +910,7 @@ async def _get_baseline_projection(
         select(func.min(Transaction.date))
         .join(Account, Transaction.account_id == Account.id)
         .where(
-            Transaction.user_id == user_id,
+            Transaction.workspace_id == workspace_id,
             Account.is_closed == False,
             Transaction.date <= today,
             Transaction.source != "opening_balance",
@@ -928,7 +931,7 @@ async def _get_baseline_projection(
         )
         .join(Account, Transaction.account_id == Account.id)
         .where(
-            Transaction.user_id == user_id,
+            Transaction.workspace_id == workspace_id,
             Account.is_closed == False,
             Transaction.date >= window_start,
             Transaction.date <= today,
@@ -982,6 +985,7 @@ async def _get_baseline_projection(
 
 async def get_cash_flow_report(
     session: AsyncSession,
+    workspace_id: uuid.UUID,
     user_id: uuid.UUID,
     months: int = 6,
     interval: str = "daily",
@@ -1021,7 +1025,9 @@ async def get_cash_flow_report(
     # "Saldo Atual" shown in the hero card. The walk is anchored at this
     # value (not at balance-at-chart_start) so opening-balance transactions
     # inside the past-history window can't introduce drift.
-    current_balance = await _balance_at(session, user_id, today)
+    current_balance = await _balance_at(
+        session, workspace_id, today, primary_currency_hint=primary_currency
+    )
 
     rate_cache: dict[str, Decimal] = {primary_currency: Decimal("1")}
 
@@ -1057,7 +1063,7 @@ async def get_cash_flow_report(
         )
         .join(Account, Transaction.account_id == Account.id)
         .where(
-            Transaction.user_id == user_id,
+            Transaction.workspace_id == workspace_id,
             Account.is_closed == False,
             flow_date_col > chart_start,
             flow_date_col <= today,
@@ -1085,7 +1091,7 @@ async def get_cash_flow_report(
         )
         .join(Account, Transaction.account_id == Account.id)
         .where(
-            Transaction.user_id == user_id,
+            Transaction.workspace_id == workspace_id,
             Account.is_closed == False,
             flow_date_col > today,
             flow_date_col <= end,
@@ -1117,7 +1123,7 @@ async def get_cash_flow_report(
             )
             .join(Account, Transaction.account_id == Account.id)
             .where(
-                Transaction.user_id == user_id,
+                Transaction.workspace_id == workspace_id,
                 Account.is_closed == False,
                 Account.type == "credit_card",
                 Transaction.date <= today,
@@ -1149,11 +1155,11 @@ async def get_cash_flow_report(
 
     if baseline:
         projections, baseline_lookback_days = await _get_baseline_projection(
-            session, user_id, today, end, primary_currency, _to_primary,
+            session, workspace_id, today, end, primary_currency, _to_primary,
         )
     else:
         projections = await _get_recurring_projections(
-            session, user_id, today + timedelta(days=1), end + timedelta(days=1),
+            session, workspace_id, today + timedelta(days=1), end + timedelta(days=1),
         )
 
     for proj in projections:

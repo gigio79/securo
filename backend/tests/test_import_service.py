@@ -547,6 +547,36 @@ class TestParseQif:
         assert len(transactions) == 1
         assert transactions[0].description == "Valid"
 
+    def test_parse_qif_windows_1252_encoding(self):
+        """QIF with accented characters encoded in Windows-1252 (Microsoft Money)."""
+        qif_text = (
+            "D01/10/2026\n"
+            "T-300.00\n"
+            "PPagamento cartão\n"
+            "MCompra em São Paulo\n"
+            "^\n"
+        )
+        transactions = parse_qif(qif_text.encode("cp1252"))
+
+        assert len(transactions) == 1
+        assert transactions[0].description == "Pagamento cartão"
+        assert transactions[0].amount == Decimal("300.00")
+        assert transactions[0].type == "debit"
+
+    def test_parse_qif_latin1_encoding(self):
+        """QIF with Latin-1 encoded characters falls back correctly."""
+        qif_text = (
+            "D02/15/2026\n"
+            "T-50.00\n"
+            "PCafé résumé\n"
+            "^\n"
+        )
+        transactions = parse_qif(qif_text.encode("latin-1"))
+
+        assert len(transactions) == 1
+        assert transactions[0].description == "Café résumé"
+        assert transactions[0].amount == Decimal("50.00")
+
     def test_parse_qif_comma_in_amount(self):
         """QIF amounts with comma thousands separator."""
         qif_content = (

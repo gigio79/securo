@@ -196,6 +196,20 @@ async def test_user(session: AsyncSession, clean_db) -> User:
 
 
 @pytest_asyncio.fixture
+async def test_workspace(session: AsyncSession, test_user: User) -> Workspace:
+    """Return the test user's default workspace (created by `test_user`)."""
+    from sqlalchemy import select as _select
+    result = await session.execute(
+        _select(Workspace)
+        .join(WorkspaceMember, WorkspaceMember.workspace_id == Workspace.id)
+        .where(WorkspaceMember.user_id == test_user.id)
+        .limit(1)
+    )
+    ws = result.scalar_one()
+    return ws
+
+
+@pytest_asyncio.fixture
 async def auth_token(client: AsyncClient, test_user: User) -> str:
     """Get an auth token for the test user."""
     response = await client.post(

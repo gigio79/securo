@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { workspaces as workspacesApi } from '@/lib/api'
-import { useWorkspace } from '@/contexts/workspace-context'
 import { useAuth } from '@/contexts/auth-context'
+import { useWorkspace } from '@/contexts/workspace-context'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   Dialog,
   DialogContent,
@@ -19,33 +19,40 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { PageHeader } from '@/components/page-header'
-import { Plus, Trash2, UserCog, Save, Users } from 'lucide-react'
+import { Plus, Save, Trash2, Users } from 'lucide-react'
 import type { WorkspaceMember, WorkspaceRole } from '@/types'
 
-const ROLE_LABELS: Record<WorkspaceRole, string> = {
-  owner: 'Owner',
-  editor: 'Editor',
-  viewer: 'Viewer',
-  manager: 'Manager',
+function labelForRole(role: WorkspaceRole, t: (key: string) => string): string {
+  return {
+    owner: t('workspace.roleOwner'),
+    editor: t('workspace.roleEditor'),
+    viewer: t('workspace.roleViewer'),
+    manager: t('workspace.roleManager'),
+  }[role]
 }
 
-const ROLE_DESCRIPTIONS: Record<WorkspaceRole, string> = {
-  owner: 'Full access — can manage members, settings, and all data',
-  editor: 'Can read and write all financial data',
-  viewer: 'Read-only access',
-  manager: 'External administrator — effective owner without being a member',
+function hintForRole(role: WorkspaceRole, t: (key: string) => string): string {
+  return {
+    owner: t('workspace.roleOwnerHint'),
+    editor: t('workspace.roleEditorHint'),
+    viewer: t('workspace.roleViewerHint'),
+    manager: t('workspace.roleManagerHint'),
+  }[role]
+}
+
+function labelForKind(kind: string, t: (key: string) => string): string {
+  const map: Record<string, string> = {
+    personal: t('workspace.kindPersonal'),
+    freelancer: t('workspace.kindFreelancer'),
+    small_business: t('workspace.kindSmallBusiness'),
+    accountant_firm: t('workspace.kindAccountantFirm'),
+  }
+  return map[kind] || kind
 }
 
 export default function WorkspaceSettingsPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { current, canManage, refresh } = useWorkspace()
   const { user: currentUser } = useAuth()
   const queryClient = useQueryClient()
@@ -59,7 +66,6 @@ export default function WorkspaceSettingsPage() {
   const [inviteRole, setInviteRole] = useState<WorkspaceRole>('editor')
   const [removeTarget, setRemoveTarget] = useState<WorkspaceMember | null>(null)
 
-  // Initialize edit fields when the active workspace changes.
   useEffect(() => {
     if (!current) return
     setEditName(current.name)
@@ -79,16 +85,18 @@ export default function WorkspaceSettingsPage() {
       return workspacesApi.update(current.id, {
         name: editName,
         default_currency: editCurrency,
-        locale: editLocale || null as unknown as string,
+        locale: editLocale || (null as unknown as string),
       })
     },
     onSuccess: () => {
-      toast.success('Workspace updated')
+      toast.success(t('workspace.saveSuccess'))
       void refresh()
     },
     onError: (e: unknown) => {
-      const msg = e instanceof Error ? e.message : 'Update failed'
-      toast.error(msg)
+      const detail =
+        (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        (e instanceof Error ? e.message : t('workspace.saveError'))
+      toast.error(detail)
     },
   })
 
@@ -102,7 +110,7 @@ export default function WorkspaceSettingsPage() {
       })
     },
     onSuccess: () => {
-      toast.success('Member added')
+      toast.success(t('workspace.addSuccess'))
       setInviteOpen(false)
       setInviteEmail('')
       setInvitePassword('')
@@ -112,7 +120,7 @@ export default function WorkspaceSettingsPage() {
     onError: (e: unknown) => {
       const detail =
         (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        (e instanceof Error ? e.message : 'Invite failed')
+        (e instanceof Error ? e.message : 'Failed')
       toast.error(detail)
     },
   })
@@ -123,14 +131,14 @@ export default function WorkspaceSettingsPage() {
       return workspacesApi.removeMember(current.id, member.user_id)
     },
     onSuccess: () => {
-      toast.success('Member removed')
+      toast.success(t('workspace.removeSuccess'))
       setRemoveTarget(null)
       queryClient.invalidateQueries({ queryKey: ['workspace-members', current?.id] })
     },
     onError: (e: unknown) => {
       const detail =
         (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        (e instanceof Error ? e.message : 'Remove failed')
+        (e instanceof Error ? e.message : 'Failed')
       toast.error(detail)
     },
   })
@@ -141,21 +149,21 @@ export default function WorkspaceSettingsPage() {
       return workspacesApi.changeRole(current.id, member.user_id, role)
     },
     onSuccess: () => {
-      toast.success('Role updated')
+      toast.success(t('workspace.roleUpdated'))
       queryClient.invalidateQueries({ queryKey: ['workspace-members', current?.id] })
     },
     onError: (e: unknown) => {
       const detail =
         (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        (e instanceof Error ? e.message : 'Update failed')
+        (e instanceof Error ? e.message : 'Failed')
       toast.error(detail)
     },
   })
 
   if (!current) {
     return (
-      <div className="container max-w-4xl py-8">
-        <Skeleton className="h-8 w-48 mb-4" />
+      <div className="container max-w-4xl py-8 space-y-4">
+        <Skeleton className="h-8 w-48" />
         <Skeleton className="h-32 w-full" />
       </div>
     )
@@ -165,36 +173,60 @@ export default function WorkspaceSettingsPage() {
   const isManaged = !!current.managed_by_user_id
   const isManagerSelf = isManaged && current.managed_by_user_id === currentUser?.id
 
+  const localeOptions: Array<{ value: string; label: string }> = [
+    { value: '', label: '—' },
+    { value: 'en', label: 'English' },
+    { value: 'pt-BR', label: 'Português (BR)' },
+  ]
+
   return (
-    <div className="container max-w-4xl py-8 space-y-8">
+    <div className="container max-w-4xl py-8 space-y-6">
       <PageHeader
-        title={t('workspace.settings', 'Workspace settings')}
-        description={t('workspace.settingsDescription', 'Manage workspace details and who has access.')}
+        title={t('workspace.settingsTitle')}
+        description={t('workspace.settingsDescription')}
       />
 
       {/* Workspace details */}
-      <section className="space-y-4 rounded-lg border p-6">
+      <section className="space-y-4 rounded-lg border bg-card p-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Details</h2>
+          <h2 className="text-base font-semibold">{t('workspace.details')}</h2>
           {isManaged && (
-            <Badge variant="secondary">
-              {isManagerSelf ? 'You manage this workspace' : 'Externally managed'}
+            <Badge variant="secondary" className="text-[11px]">
+              {isManagerSelf
+                ? t('workspace.youManageThis')
+                : t('workspace.externallyManaged')}
             </Badge>
           )}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="ws-name">Name</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="ws-name" className="text-[13px]">
+              {t('workspace.name')}
+            </Label>
             <Input
               id="ws-name"
               value={editName}
               onChange={(e) => setEditName(e.target.value)}
               disabled={!canManage}
               maxLength={100}
+              className="h-10 rounded-lg"
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="ws-currency">Default currency</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="ws-kind" className="text-[13px]">
+              {t('workspace.kind')}
+            </Label>
+            <Input
+              id="ws-kind"
+              value={labelForKind(current.kind, t)}
+              disabled
+              className="h-10 rounded-lg"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="ws-currency" className="text-[13px]">
+              {t('workspace.defaultCurrency')}
+            </Label>
             <Input
               id="ws-currency"
               value={editCurrency}
@@ -202,49 +234,60 @@ export default function WorkspaceSettingsPage() {
               disabled={!canManage}
               maxLength={3}
               placeholder="USD"
+              className="h-10 rounded-lg uppercase"
             />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="ws-locale">Locale</Label>
-            <Input
+          <div className="space-y-1.5">
+            <Label htmlFor="ws-locale" className="text-[13px]">
+              {t('workspace.locale')}
+            </Label>
+            <select
               id="ws-locale"
               value={editLocale}
               onChange={(e) => setEditLocale(e.target.value)}
               disabled={!canManage}
-              maxLength={10}
-              placeholder="en, pt-BR"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Kind</Label>
-            <Input value={current.kind} disabled />
+              className="w-full h-10 rounded-lg border border-input bg-background px-3 text-sm disabled:opacity-60"
+            >
+              {localeOptions.map((opt) => (
+                <option key={opt.value || 'empty'} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
         {canManage && (
-          <div className="flex justify-end">
+          <div className="flex justify-end pt-1">
             <Button
               onClick={() => updateMutation.mutate()}
               disabled={updateMutation.isPending}
+              className="rounded-lg"
             >
               <Save className="mr-2 h-4 w-4" />
-              Save
+              {updateMutation.isPending ? t('common.loading') : t('common.save')}
             </Button>
           </div>
         )}
       </section>
 
       {/* Members */}
-      <section className="space-y-4 rounded-lg border p-6">
+      <section className="space-y-4 rounded-lg border bg-card p-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Users className="h-5 w-5 text-muted-foreground" />
-            <h2 className="text-lg font-semibold">Members</h2>
-            <Badge variant="outline">{members.length}</Badge>
+            <Users className="h-4 w-4 text-muted-foreground" />
+            <h2 className="text-base font-semibold">{t('workspace.members')}</h2>
+            <Badge variant="outline" className="text-[11px]">
+              {members.length}
+            </Badge>
           </div>
           {canManage && (
-            <Button onClick={() => setInviteOpen(true)} size="sm">
+            <Button
+              onClick={() => setInviteOpen(true)}
+              size="sm"
+              className="rounded-lg"
+            >
               <Plus className="mr-2 h-4 w-4" />
-              Add member
+              {t('workspace.addMember')}
             </Button>
           )}
         </div>
@@ -253,58 +296,62 @@ export default function WorkspaceSettingsPage() {
           <Skeleton className="h-16 w-full" />
         ) : members.length === 0 ? (
           <p className="text-sm text-muted-foreground">
-            No members yet. {canManage && 'Click "Add member" to invite someone.'}
+            {t('workspace.noMembers')}{' '}
+            {canManage && t('workspace.noMembersHint')}
           </p>
         ) : (
           <ul className="divide-y">
             {members.map((m) => {
               const isMe = m.user_id === currentUser?.id
               return (
-                <li key={m.id} className="py-3 flex items-center gap-4">
+                <li key={m.id} className="py-3 flex items-center gap-3">
                   <Avatar className="h-9 w-9">
-                    <AvatarFallback>
+                    <AvatarFallback className="bg-primary/15 text-primary text-xs font-semibold">
                       {(m.display_name || m.email).slice(0, 2).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium truncate">
+                    <p className="text-sm font-medium truncate">
                       {m.display_name || m.email}
                       {isMe && (
-                        <span className="ml-2 text-xs text-muted-foreground">(you)</span>
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          ({t('workspace.you')})
+                        </span>
                       )}
                     </p>
-                    <p className="text-sm text-muted-foreground truncate">{m.email}</p>
+                    {m.display_name && (
+                      <p className="text-xs text-muted-foreground truncate">{m.email}</p>
+                    )}
                   </div>
                   {canManage && !isMe ? (
-                    <Select
+                    <select
                       value={m.role}
-                      onValueChange={(value) =>
+                      onChange={(e) =>
                         roleChangeMutation.mutate({
                           member: m,
-                          role: value as WorkspaceRole,
+                          role: e.target.value as WorkspaceRole,
                         })
                       }
+                      className="h-9 w-32 rounded-lg border border-input bg-background px-2 text-sm"
                     >
-                      <SelectTrigger className="w-32">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(['owner', 'editor', 'viewer'] as WorkspaceRole[]).map((r) => (
-                          <SelectItem key={r} value={r}>
-                            {ROLE_LABELS[r]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      {(['owner', 'editor', 'viewer'] as WorkspaceRole[]).map((r) => (
+                        <option key={r} value={r}>
+                          {labelForRole(r, t)}
+                        </option>
+                      ))}
+                    </select>
                   ) : (
-                    <Badge variant="secondary">{ROLE_LABELS[m.role]}</Badge>
+                    <Badge variant="secondary" className="text-[11px]">
+                      {labelForRole(m.role, t)}
+                    </Badge>
                   )}
                   {canManage && !isMe && (
                     <Button
                       variant="ghost"
                       size="icon"
                       onClick={() => setRemoveTarget(m)}
-                      title="Remove member"
+                      title={t('workspace.remove')}
+                      className="rounded-lg"
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
@@ -320,95 +367,106 @@ export default function WorkspaceSettingsPage() {
       <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add member</DialogTitle>
-            <DialogDescription>
-              Invite an existing user by email, or create a new one by providing a password.
-            </DialogDescription>
+            <DialogTitle>{t('workspace.addMemberTitle')}</DialogTitle>
+            <DialogDescription>{t('workspace.addMemberDescription')}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="invite-email">Email</Label>
+          <div className="space-y-4 py-1">
+            <div className="space-y-1.5">
+              <Label htmlFor="invite-email" className="text-[13px]">
+                {t('admin.users.email', 'Email')}
+              </Label>
               <Input
                 id="invite-email"
                 type="email"
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
                 autoFocus
+                className="h-10 rounded-lg"
+                placeholder="user@example.com"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="invite-role">Role</Label>
-              <Select
+            <div className="space-y-1.5">
+              <Label htmlFor="invite-role" className="text-[13px]">
+                {t('workspace.role')}
+              </Label>
+              <select
+                id="invite-role"
                 value={inviteRole}
-                onValueChange={(v) => setInviteRole(v as WorkspaceRole)}
+                onChange={(e) => setInviteRole(e.target.value as WorkspaceRole)}
+                className="w-full h-10 rounded-lg border border-input bg-background px-3 text-sm"
               >
-                <SelectTrigger id="invite-role">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(['owner', 'editor', 'viewer'] as WorkspaceRole[]).map((r) => (
-                    <SelectItem key={r} value={r}>
-                      <div className="flex flex-col">
-                        <span>{ROLE_LABELS[r]}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {ROLE_DESCRIPTIONS[r]}
-                        </span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                {(['owner', 'editor', 'viewer'] as WorkspaceRole[]).map((r) => (
+                  <option key={r} value={r}>
+                    {labelForRole(r, t)} — {hintForRole(r, t)}
+                  </option>
+                ))}
+              </select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="invite-password">Password (only for new users)</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="invite-password" className="text-[13px]">
+                {t('workspace.passwordForNewUsers')}
+              </Label>
               <Input
                 id="invite-password"
                 type="password"
                 value={invitePassword}
                 onChange={(e) => setInvitePassword(e.target.value)}
-                placeholder="Leave empty if user already exists"
+                className="h-10 rounded-lg"
+                placeholder=""
               />
-              <p className="text-xs text-muted-foreground">
-                If the email isn't already registered, this password will be used to
-                create their account. They can change it after first login.
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {t('workspace.passwordHint')}
               </p>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setInviteOpen(false)}>
-              Cancel
+            <Button
+              variant="outline"
+              onClick={() => setInviteOpen(false)}
+              className="rounded-lg"
+            >
+              {t('common.cancel')}
             </Button>
             <Button
               onClick={() => inviteMutation.mutate()}
               disabled={inviteMutation.isPending || !inviteEmail.trim()}
+              className="rounded-lg"
             >
-              <UserCog className="mr-2 h-4 w-4" />
-              Add
+              {inviteMutation.isPending ? t('common.loading') : t('common.save')}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Confirm remove dialog */}
-      <Dialog open={!!removeTarget} onOpenChange={(open) => !open && setRemoveTarget(null)}>
+      <Dialog
+        open={!!removeTarget}
+        onOpenChange={(open) => !open && setRemoveTarget(null)}
+      >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Remove member</DialogTitle>
+            <DialogTitle>{t('workspace.removeConfirmTitle')}</DialogTitle>
             <DialogDescription>
-              Remove {removeTarget?.email} from this workspace? They'll lose access to all
-              data inside it. This does not delete their user account.
+              {t('workspace.removeConfirmDescription', {
+                email: removeTarget?.email,
+              })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setRemoveTarget(null)}>
-              Cancel
+            <Button
+              variant="outline"
+              onClick={() => setRemoveTarget(null)}
+              className="rounded-lg"
+            >
+              {t('common.cancel')}
             </Button>
             <Button
               variant="destructive"
               onClick={() => removeTarget && removeMutation.mutate(removeTarget)}
               disabled={removeMutation.isPending}
+              className="rounded-lg"
             >
-              Remove
+              {removeMutation.isPending ? t('common.loading') : t('workspace.remove')}
             </Button>
           </DialogFooter>
         </DialogContent>

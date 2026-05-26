@@ -28,6 +28,7 @@ import { APP_VERSION } from '@/lib/build-info'
 import { ShellLogo } from '@/components/shell-logo'
 import { UpdateAvailableBanner } from '@/components/update-available-banner'
 import { UpdateAvailableDialog } from '@/components/update-available-dialog'
+import { WorkspaceSwitcher } from '@/components/workspace-switcher'
 import {
   ArrowLeftRight,
   Building2,
@@ -486,6 +487,11 @@ export function AppLayout() {
           </div>
 
           <UpdateAvailableBanner onOpen={() => setUpdateDialogOpen(true)} />
+
+          {/* Workspace switcher */}
+          <div className="px-3 pt-1">
+            <WorkspaceSwitcher />
+          </div>
 
           {/* User section */}
           <div className="px-3 pt-1">

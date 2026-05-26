@@ -34,7 +34,6 @@ import {
   Building2,
   SlidersHorizontal,
   Upload,
-  LogOut,
   Menu,
   ChevronRight,
   Tag,
@@ -55,7 +54,6 @@ import {
   HardDriveDownload,
   Shield,
   ShieldCheck,
-  Download,
 } from 'lucide-react'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { ChangePasswordDialog } from '@/components/change-password-dialog'
@@ -105,7 +103,6 @@ export function AppLayout() {
   const locale = i18n.language === 'en' ? 'en-US' : i18n.language
   const { theme, setTheme } = useTheme()
   const location = useLocation()
-  const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [accountsExpanded, setAccountsExpanded] = useState(true)
   const [accountsShowAll, setAccountsShowAll] = useState(false)
@@ -163,7 +160,6 @@ export function AppLayout() {
   }, [user, updateUser])
 
   const userInitial = user?.email?.charAt(0).toUpperCase() ?? '?'
-  const currentLang = i18n.language
   const resolvedTheme = theme === 'system' ? undefined : theme
   const isDark = resolvedTheme
     ? resolvedTheme === 'dark'

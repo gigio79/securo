@@ -69,12 +69,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const switchWorkspace = useCallback(
     async (id: string) => {
       if (id === currentId) return
+      // Persist FIRST so the axios interceptor sends the new
+      // workspace_id on every refetch fired below.
       localStorage.setItem(WORKSPACE_STORAGE_KEY, id)
       setCurrentId(id)
-      // Every cached query was scoped to the previous workspace. Clear
-      // the entire React Query cache so the next reads come from the
-      // newly-selected workspace.
-      queryClient.clear()
+      // Every cached query was scoped to the previous workspace.
+      // `resetQueries` flushes cached data AND refetches active
+      // observers in one call — `clear()` alone removed data without
+      // triggering refetches (mounted components kept their previous
+      // render until a manual reload).
+      await queryClient.resetQueries()
     },
     [currentId, queryClient],
   )

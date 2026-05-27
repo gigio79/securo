@@ -40,15 +40,23 @@ async def create_default_categories(
     lang: str = "pt-BR",
     workspace_id: Optional[uuid.UUID] = None,
 ) -> list[Category]:
-    # Guard against double-creation (race between categories and groups endpoints)
-    existing = await session.execute(
-        select(Category).where(Category.user_id == user_id).limit(1)
-    )
-    if existing.scalar_one_or_none():
-        # Re-query by workspace when available — falls back to the user's
-        # first workspace via autostamp resolution in tests/legacy callers.
-        scope_id = workspace_id
-        if scope_id is None:
+    # Guard against double-creation. Scope the check to the workspace
+    # when one is provided so a user creating a SECOND workspace still
+    # gets the defaults seeded there — the prior guard checked
+    # user_id and short-circuited every workspace after the first.
+    if workspace_id is not None:
+        existing = await session.execute(
+            select(Category).where(Category.workspace_id == workspace_id).limit(1)
+        )
+        if existing.scalar_one_or_none():
+            return await get_categories(session, workspace_id)
+    else:
+        # Legacy/test path with no explicit workspace_id — fall back to
+        # the user's first workspace via the autostamp listener.
+        existing = await session.execute(
+            select(Category).where(Category.user_id == user_id).limit(1)
+        )
+        if existing.scalar_one_or_none():
             from app.models.workspace import Workspace, WorkspaceMember
             row = await session.execute(
                 select(Workspace.id)
@@ -57,7 +65,7 @@ async def create_default_categories(
                 .limit(1)
             )
             scope_id = row.scalar()
-        return await get_categories(session, scope_id) if scope_id else []
+            return await get_categories(session, scope_id) if scope_id else []
 
     # Create default groups first
     groups = await create_default_groups(session, user_id, lang, workspace_id=workspace_id)

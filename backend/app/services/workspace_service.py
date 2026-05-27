@@ -212,6 +212,7 @@ async def create_workspace(
     icon: Optional[str] = None,
     color: Optional[str] = None,
     self_membership: bool = False,
+    seed_defaults: bool = True,
 ) -> Workspace:
     """Create a new workspace administered by `creator`.
 
@@ -219,15 +220,21 @@ async def create_workspace(
     `workspace_members` row). Pass `self_membership=True` to ALSO add
     them as an owner — useful when the creator is the human who'll
     actually use the workspace day-to-day.
+
+    `seed_defaults=True` (the default) seeds the same starter
+    categories + rules the Personal workspace gets. Without this every
+    new workspace would force the user to rebuild their taxonomy from
+    scratch.
     """
     prefs = creator.preferences or {}
+    workspace_locale = locale or prefs.get("language") or "en"
     workspace = Workspace(
         name=name.strip() or "Workspace",
         kind=kind,
         created_by_user_id=creator.id,
         managed_by_user_id=creator.id,
         default_currency=default_currency or prefs.get("currency_display", "USD"),
-        locale=locale or prefs.get("language"),
+        locale=workspace_locale,
         icon=icon,
         color=color,
     )
@@ -242,6 +249,19 @@ async def create_workspace(
             )
         )
         await session.flush()
+    if seed_defaults:
+        # Local imports to dodge circular dependencies — category_service
+        # transitively pulls workspace_service through the autostamp
+        # listener registration.
+        from app.services.category_service import create_default_categories
+        from app.services.rule_service import create_default_rules
+
+        await create_default_categories(
+            session, creator.id, workspace_locale, workspace_id=workspace.id
+        )
+        await create_default_rules(
+            session, creator.id, workspace_locale, workspace_id=workspace.id
+        )
     return workspace
 
 

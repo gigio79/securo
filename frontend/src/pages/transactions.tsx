@@ -1036,7 +1036,7 @@ export default function TransactionsPage() {
         section={t('transactions.section')}
         title={t('transactions.title')}
         action={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
             <MonthStepper
               value={steppedMonth}
               onChange={handleMonthChange}

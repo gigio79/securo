@@ -314,7 +314,7 @@ async def _upsert_asset_value_for_today(
 
 async def _match_pluggy_category(
     session: AsyncSession,
-    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     pluggy_category: Optional[str],
     enabled: bool = True,
 ) -> Optional[uuid.UUID]:
@@ -330,10 +330,16 @@ async def _match_pluggy_category(
         app_name = PLUGGY_CATEGORY_MAP.get(pluggy_category.split(" - ")[0])
     if not app_name:
         return None
+    # Scope to the connection's workspace: a user in multiple workspaces owns
+    # the same default category names in each, so a user_id-only lookup returns
+    # several rows. `.first()` is belt-and-suspenders — a category match must
+    # never crash the whole sync even if a workspace somehow has name dupes.
     result = await session.execute(
-        select(Category.id).where(Category.user_id == user_id, Category.name == app_name)
+        select(Category.id)
+        .where(Category.workspace_id == workspace_id, Category.name == app_name)
+        .limit(1)
     )
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def get_connections(session: AsyncSession, workspace_id: uuid.UUID) -> list[BankConnection]:
@@ -578,7 +584,7 @@ async def handle_oauth_callback(
                 continue
 
             category_id = await _match_pluggy_category(
-                session, user_id, txn_data.pluggy_category, enabled=use_provider_cats
+                session, workspace_id, txn_data.pluggy_category, enabled=use_provider_cats
             )
             # Resolve payee entity from raw payee text
             payee_id = None
@@ -1278,7 +1284,7 @@ async def sync_connection(
                     continue
 
                 category_id = await _match_pluggy_category(
-                    session, user_id, txn_data.pluggy_category, enabled=use_provider_cats
+                    session, workspace_id, txn_data.pluggy_category, enabled=use_provider_cats
                 )
 
                 # Resolve payee entity from raw payee text

@@ -43,10 +43,11 @@ function formatCompact(value: number, currency = 'USD', locale = 'en-US') {
 
 const COMPOSITION_TOP_N = 6
 
-type RangeOption = { key: string; months: number }
+type RangeOption = { key: string; months: number; period?: 'ytd' }
 
 const HISTORICAL_RANGE_OPTIONS: readonly RangeOption[] = [
   { key: '6m', months: 6 },
+  { key: 'ytd', months: 12, period: 'ytd' },
   { key: '1y', months: 12 },
   { key: '2y', months: 24 },
 ]
@@ -81,6 +82,7 @@ const RANGE_LABELS: Record<string, string> = {
   '3m': 'range3m',
   '6m': 'range6m',
   '1y': 'range1y',
+  ytd: 'rangeYtd',
   '12m': 'range12m',
   '2y': 'range2y',
 }
@@ -88,14 +90,13 @@ const RANGE_LABELS: Record<string, string> = {
 interface ReportTab {
   key: string
   labelKey: string
-  fetch: (months: number, interval: string) => Promise<ReportResponse>
   enabled: boolean
 }
 
 const REPORT_TABS: ReportTab[] = [
-  { key: 'net_worth', labelKey: 'reports.netWorth', fetch: (m, i) => reports.netWorth(m, i), enabled: true },
-  { key: 'income_expenses', labelKey: 'reports.incomeExpenses', fetch: (m, i) => reports.incomeExpenses(m, i), enabled: true },
-  { key: 'cash_flow', labelKey: 'reports.cashFlow', fetch: (m, i) => reports.cashFlow(m, i), enabled: true },
+  { key: 'net_worth', labelKey: 'reports.netWorth', enabled: true },
+  { key: 'income_expenses', labelKey: 'reports.incomeExpenses', enabled: true },
+  { key: 'cash_flow', labelKey: 'reports.cashFlow', enabled: true },
 ]
 
 export default function ReportsPage() {
@@ -105,7 +106,7 @@ export default function ReportsPage() {
   const userCurrency = user?.preferences?.currency_display ?? 'USD'
   const locale = useDisplayLocale()
 
-  const [months, setMonths] = useState(12)
+  const [rangeKey, setRangeKey] = useState('1y')
   const [interval, setInterval] = useState('monthly')
   const [activeTab, setActiveTab] = useState('net_worth')
   const [compositionView, setCompositionView] = useState<string>('summary')
@@ -127,6 +128,9 @@ export default function ReportsPage() {
   const isCashFlow = activeTab === 'cash_flow'
   const rangeOptions = isCashFlow ? FORWARD_RANGE_OPTIONS : HISTORICAL_RANGE_OPTIONS
   const intervalOptions = isCashFlow ? CASH_FLOW_INTERVAL_OPTIONS : HISTORICAL_INTERVAL_OPTIONS
+  const selectedRange = rangeOptions.find((r) => r.key === rangeKey) ?? rangeOptions[0]
+  const months = selectedRange.months
+  const period = selectedRange.period
 
   const handleSelectTab = (key: string) => {
     setActiveTab(key)
@@ -134,8 +138,8 @@ export default function ReportsPage() {
     setSparklinePage(0)
     // Clamp months/interval to options supported by the new tab
     const nextRanges = key === 'cash_flow' ? FORWARD_RANGE_OPTIONS : HISTORICAL_RANGE_OPTIONS
-    if (!nextRanges.some((r) => r.months === months)) {
-      setMonths(key === 'cash_flow' ? 6 : 12)
+    if (!nextRanges.some((r) => r.key === rangeKey)) {
+      setRangeKey(key === 'cash_flow' ? '6m' : '1y')
     }
     const nextIntervals = key === 'cash_flow' ? CASH_FLOW_INTERVAL_OPTIONS : HISTORICAL_INTERVAL_OPTIONS
     if (!nextIntervals.some((i) => i.value === interval)) {
@@ -144,13 +148,13 @@ export default function ReportsPage() {
   }
 
   const { data, isLoading } = useQuery<ReportResponse>({
-    queryKey: ['reports', activeTab, months, interval, isCashFlow ? cashFlowBaseline : false, activeAccountIds, activeWalletIds],
+    queryKey: ['reports', activeTab, rangeKey, months, period ?? null, interval, isCashFlow ? cashFlowBaseline : false, activeAccountIds, activeWalletIds],
     queryFn: () =>
       isCashFlow
         ? reports.cashFlow(months, interval, cashFlowBaseline, acctIds)
         : activeTab === 'income_expenses'
-          ? reports.incomeExpenses(months, interval, acctIds)
-          : reports.netWorth(months, interval, acctIds, walletIds),
+          ? reports.incomeExpenses(months, interval, acctIds, period)
+          : reports.netWorth(months, interval, acctIds, walletIds, period),
     enabled: currentTab.enabled && !(noAccounts && activeTab !== 'net_worth'),
   })
 
@@ -289,9 +293,9 @@ export default function ReportsPage() {
               {rangeOptions.map((opt) => (
                 <button
                   key={opt.key}
-                  onClick={() => setMonths(opt.months)}
+                  onClick={() => setRangeKey(opt.key)}
                   className={`px-3 py-1.5 text-xs font-semibold transition-colors ${
-                    months === opt.months
+                    rangeKey === opt.key
                       ? 'bg-primary text-primary-foreground'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/50'
                   }`}

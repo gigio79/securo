@@ -22,6 +22,7 @@ from app.models.user import User
 from app.providers import get_provider
 from app.providers.base import (
     HoldingData,
+    ProviderRateLimited,
     ProviderUserActionRequired,
     SessionExpiredError,
 )
@@ -314,7 +315,7 @@ async def _upsert_asset_value_for_today(
 
 async def _match_pluggy_category(
     session: AsyncSession,
-    user_id: uuid.UUID,
+    workspace_id: uuid.UUID,
     pluggy_category: Optional[str],
     enabled: bool = True,
 ) -> Optional[uuid.UUID]:
@@ -330,10 +331,16 @@ async def _match_pluggy_category(
         app_name = PLUGGY_CATEGORY_MAP.get(pluggy_category.split(" - ")[0])
     if not app_name:
         return None
+    # Scope to the connection's workspace: a user in multiple workspaces owns
+    # the same default category names in each, so a user_id-only lookup returns
+    # several rows. `.first()` is belt-and-suspenders — a category match must
+    # never crash the whole sync even if a workspace somehow has name dupes.
     result = await session.execute(
-        select(Category.id).where(Category.user_id == user_id, Category.name == app_name)
+        select(Category.id)
+        .where(Category.workspace_id == workspace_id, Category.name == app_name)
+        .limit(1)
     )
-    return result.scalar_one_or_none()
+    return result.scalars().first()
 
 
 async def get_connections(session: AsyncSession, workspace_id: uuid.UUID) -> list[BankConnection]:
@@ -578,7 +585,7 @@ async def handle_oauth_callback(
                 continue
 
             category_id = await _match_pluggy_category(
-                session, user_id, txn_data.pluggy_category, enabled=use_provider_cats
+                session, workspace_id, txn_data.pluggy_category, enabled=use_provider_cats
             )
             # Resolve payee entity from raw payee text
             payee_id = None
@@ -1278,7 +1285,7 @@ async def sync_connection(
                     continue
 
                 category_id = await _match_pluggy_category(
-                    session, user_id, txn_data.pluggy_category, enabled=use_provider_cats
+                    session, workspace_id, txn_data.pluggy_category, enabled=use_provider_cats
                 )
 
                 # Resolve payee entity from raw payee text
@@ -1375,6 +1382,18 @@ async def sync_connection(
         # so the API layer can surface the specific code to the UI.
         await session.rollback()
         raise
+    except ProviderRateLimited:
+        # The bank/aggregator is throttling data requests (PSD2 caps unattended
+        # access, commonly ~4/day). The connection is healthy, so don't error
+        # it or 500 the request — skip this run, keep it active, and leave
+        # last_sync_at untouched so the next sync retries the same window.
+        await session.rollback()
+        async with session.begin():
+            conn = await session.get(BankConnection, connection_id)
+            if conn and conn.status != "expired":
+                conn.status = "active"
+        refreshed = await session.get(BankConnection, connection_id)
+        return refreshed, 0
     except Exception:
         # Mark connection as errored so UI shows reconnect banner
         await session.rollback()

@@ -25,6 +25,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { PageHeader } from '@/components/page-header'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
+import { useCollectionFilter } from '@/contexts/collection-filter-context'
 import type { ReportResponse, CategoryTrendItem } from '@/types'
 
 function formatCurrency(value: number, currency = 'USD', locale = 'en-US') {
@@ -111,6 +112,11 @@ export default function ReportsPage() {
   const [sparklineView, setSparklineView] = useState<'byExpenses' | 'byIncome'>('byExpenses')
   const [sparklinePage, setSparklinePage] = useState(0)
   const [cashFlowBaseline, setCashFlowBaseline] = useState(false)
+  // Active Collection filter (issue #105): scope all report tabs to its
+  // accounts; net worth also includes the collection's wallets' assets.
+  const { activeAccountIds, activeWalletIds } = useCollectionFilter()
+  const acctIds = activeAccountIds ?? undefined
+  const walletIds = activeWalletIds ?? undefined
 
   const currentTab = REPORT_TABS.find((tab) => tab.key === activeTab) ?? REPORT_TABS[0]
 
@@ -134,11 +140,13 @@ export default function ReportsPage() {
   }
 
   const { data, isLoading } = useQuery<ReportResponse>({
-    queryKey: ['reports', activeTab, months, interval, isCashFlow ? cashFlowBaseline : false],
+    queryKey: ['reports', activeTab, months, interval, isCashFlow ? cashFlowBaseline : false, activeAccountIds, activeWalletIds],
     queryFn: () =>
       isCashFlow
-        ? reports.cashFlow(months, interval, cashFlowBaseline)
-        : currentTab.fetch(months, interval),
+        ? reports.cashFlow(months, interval, cashFlowBaseline, acctIds)
+        : activeTab === 'income_expenses'
+          ? reports.incomeExpenses(months, interval, acctIds)
+          : reports.netWorth(months, interval, acctIds, walletIds),
     enabled: currentTab.enabled,
   })
 

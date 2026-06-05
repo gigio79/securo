@@ -117,6 +117,10 @@ export default function ReportsPage() {
   const { activeAccountIds, activeWalletIds } = useCollectionFilter()
   const acctIds = activeAccountIds ?? undefined
   const walletIds = activeWalletIds ?? undefined
+  // Wallet-only collection (active, zero accounts): the account-based reports
+  // (income/expenses, cash flow) have no data — only net worth (which includes
+  // the wallets' assets) is meaningful.
+  const noAccounts = activeAccountIds !== null && activeAccountIds.length === 0
 
   const currentTab = REPORT_TABS.find((tab) => tab.key === activeTab) ?? REPORT_TABS[0]
 
@@ -147,7 +151,7 @@ export default function ReportsPage() {
         : activeTab === 'income_expenses'
           ? reports.incomeExpenses(months, interval, acctIds)
           : reports.netWorth(months, interval, acctIds, walletIds),
-    enabled: currentTab.enabled,
+    enabled: currentTab.enabled && !(noAccounts && activeTab !== 'net_worth'),
   })
 
   const summary = data?.summary

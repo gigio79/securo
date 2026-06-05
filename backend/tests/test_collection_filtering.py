@@ -166,3 +166,48 @@ async def test_net_worth_includes_collection_wallet_assets(
     assert summ.assets_value_primary == 3000.0
     # total_balance includes asset values by design: account 1000 + wallet 3000.
     assert summ.total_balance.get("BRL") == 4000.0
+
+
+@pytest.mark.asyncio
+async def test_wallet_only_collection_shows_assets_no_accounts(
+    session: AsyncSession, test_user: User, test_workspace
+):
+    """A wallet-only collection (no accounts) filters accounts to none and
+    shows only the wallet's assets — driven by asset_group_ids with
+    account_ids omitted, the way the frontend sends it."""
+    # An account with a balance that must NOT appear (it's not in the collection).
+    other = await _account(session, test_user, "Not in collection")
+    await _txn(session, test_user, other, 7777, "credit")
+
+    wallet = AssetGroup(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        name="Crypto",
+    )
+    session.add(wallet)
+    await session.commit()
+    session.add(Asset(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        name="BTC", type="crypto", currency="BRL", group_id=wallet.id,
+        purchase_price=Decimal("2500"), purchase_date=date.today().replace(day=1),
+        valuation_method="manual",
+    ))
+    await session.commit()
+
+    ws = test_workspace.id
+    # Frontend sends asset_group_ids only (empty account list isn't transmittable);
+    # the service coerces accounts to empty so the 7777 account is excluded.
+    summ = await dashboard_service.get_summary(
+        session, ws, test_user.id, asset_group_ids=[wallet.id]
+    )
+    assert summ.accounts_count == 0
+    assert summ.monthly_income == 0.0
+    assert summ.assets_value_primary == 2500.0
+    assert summ.total_balance.get("BRL") == 2500.0  # only the wallet asset
+
+    rep = await report_service.get_net_worth_report(
+        session, ws, test_user.id, asset_group_ids=[wallet.id]
+    )
+    assert rep.summary.breakdowns[0].value == 0.0  # accounts
+    assets_bd = next(b for b in rep.summary.breakdowns if b.key == "assets")
+    assert assets_bd.value == 2500.0
+    assert rep.summary.primary_value == 2500.0

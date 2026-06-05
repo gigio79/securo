@@ -305,9 +305,15 @@ export default function TransactionsPage() {
   const effectiveAccountIds = filterAccountIds.length > 0
     ? filterAccountIds
     : (activeAccountIds ?? [])
+  // Wallet-only collection active (zero accounts) and no explicit on-page
+  // account filter → there are no matching transactions; show empty rather
+  // than falling back to all accounts.
+  const noAccounts = filterAccountIds.length === 0
+    && activeAccountIds !== null && activeAccountIds.length === 0
 
   const { data, isLoading } = useQuery({
     queryKey: ['transactions', page, effectiveAccountIds, filterCategoryIds, filterUncategorized, filterPayee, filterGroupId, filterType, filterFrom, filterTo, filterMinAmount, filterMaxAmount, searchQuery, tagFilters, grid.sortBy, grid.sortDir],
+    enabled: !noAccounts,
     queryFn: () =>
       transactions.list({
         page,

@@ -187,6 +187,54 @@ async def test_collection_with_wallets(
 
 
 @pytest.mark.asyncio
+async def test_same_account_and_wallet_shared_across_collections(
+    client: AsyncClient, auth_headers, test_user: User, session: AsyncSession
+):
+    """Membership is many-to-many: the same account or wallet can belong to
+    any number of collections simultaneously."""
+    acc = await _make_account(session, test_user, "Shared acct")
+    wallet = await _make_wallet(session, test_user, "Shared wallet")
+
+    payload = {"account_ids": [str(acc.id)], "wallet_ids": [str(wallet.id)]}
+    c1 = (await client.post("/api/collections", headers=auth_headers, json={"name": "C1", **payload})).json()
+    c2 = (await client.post("/api/collections", headers=auth_headers, json={"name": "C2", **payload})).json()
+    c3 = (await client.post("/api/collections", headers=auth_headers, json={"name": "C3", **payload})).json()
+
+    # All three independently reference the same account + wallet.
+    for c in (c1, c2, c3):
+        assert c["account_ids"] == [str(acc.id)]
+        assert c["wallet_ids"] == [str(wallet.id)]
+
+    listed = (await client.get("/api/collections", headers=auth_headers)).json()
+    assert len(listed) == 3
+    # Deleting one collection leaves the shared members intact in the others.
+    await client.delete(f"/api/collections/{c1['id']}", headers=auth_headers)
+    remaining = (await client.get("/api/collections", headers=auth_headers)).json()
+    assert {c["name"] for c in remaining} == {"C2", "C3"}
+    for c in remaining:
+        assert c["account_ids"] == [str(acc.id)]
+        assert c["wallet_ids"] == [str(wallet.id)]
+
+
+@pytest.mark.asyncio
+async def test_wallet_only_collection(
+    client: AsyncClient, auth_headers, test_user: User, session: AsyncSession
+):
+    """A collection can hold only wallets (no accounts)."""
+    w = await _make_wallet(session, test_user, "Only wallet")
+    resp = await client.post(
+        "/api/collections", headers=auth_headers,
+        json={"name": "Wallet-only", "wallet_ids": [str(w.id)]},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["account_count"] == 0
+    assert body["account_ids"] == []
+    assert body["wallet_count"] == 1
+    assert body["wallet_ids"] == [str(w.id)]
+
+
+@pytest.mark.asyncio
 async def test_update_missing_collection_404(client: AsyncClient, auth_headers, test_user: User):
     resp = await client.patch(
         f"/api/collections/{uuid.uuid4()}", headers=auth_headers, json={"name": "x"}

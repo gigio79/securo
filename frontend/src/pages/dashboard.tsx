@@ -88,6 +88,10 @@ export default function DashboardPage() {
   const { activeAccountIds, activeWalletIds } = useCollectionFilter()
   const acctIds = activeAccountIds ?? undefined
   const walletIds = activeWalletIds ?? undefined
+  // A wallet-only collection (active, but with zero accounts) has no account
+  // data — skip the account-only cards so they render empty instead of
+  // silently falling back to "all accounts".
+  const noAccounts = activeAccountIds !== null && activeAccountIds.length === 0
 
   const { data: summary, isLoading: summaryLoading } = useQuery({
     queryKey: ['dashboard', 'summary', selectedMonth, activeAccountIds, activeWalletIds],
@@ -97,6 +101,7 @@ export default function DashboardPage() {
   const { data: spending, isLoading: spendingLoading } = useQuery({
     queryKey: ['dashboard', 'spending', selectedMonth, activeAccountIds],
     queryFn: () => dashboard.spendingByCategory(monthParam, acctIds),
+    enabled: !noAccounts,
   })
 
   const prevMonth = shiftMonth(selectedMonth, -1)
@@ -104,6 +109,7 @@ export default function DashboardPage() {
   const { data: balanceHistory, isLoading: balanceHistoryLoading } = useQuery({
     queryKey: ['dashboard', 'balance-history', selectedMonth, activeAccountIds],
     queryFn: () => dashboard.balanceHistory(monthParam, acctIds),
+    enabled: !noAccounts,
   })
 
   const { data: currentMonthTxs, isLoading: currentTxLoading } = useQuery({
@@ -115,6 +121,7 @@ export default function DashboardPage() {
       exclude_transfers: true,
       account_ids: acctIds,
     }),
+    enabled: !noAccounts,
   })
 
   // Resolve group_id → name for the badge on split transactions.
@@ -1039,7 +1046,17 @@ export default function DashboardPage() {
       </div>
 
       <TransactionDrillDown
-        filter={drillDown}
+        filter={
+          drillDown
+            ? {
+                ...drillDown,
+                // Keep drill-downs consistent with the collection-scoped cards
+                // they open from (e.g. "Categorize now").
+                account_ids:
+                  drillDown.account_ids ?? (acctIds && acctIds.length > 0 ? acctIds : undefined),
+              }
+            : null
+        }
         onClose={() => setDrillDown(null)}
         onTransactionClick={(tx) => { setEditingTx(tx); setDialogOpen(true) }}
       />

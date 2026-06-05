@@ -418,9 +418,6 @@ export function AppLayout() {
             })}
           </nav>
 
-          {/* Active-collection selector (filters the app — issue #105) */}
-          <CollectionSelector />
-
           {/* Account list in sidebar */}
           {allAccounts.length > 0 && (
             <div className="px-3 pb-2 mt-2">
@@ -545,6 +542,9 @@ export function AppLayout() {
         {/* Main content */}
         <main className="flex-1 min-h-screen overflow-x-hidden lg:ml-60">
           <div className="p-6 max-w-7xl mx-auto">
+            {/* Active-collection filter (issue #105): sticky bar above the
+                content so the scope is visible right where the data is. */}
+            <CollectionSelector variant="header" />
             <Outlet />
           </div>
         </main>

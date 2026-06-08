@@ -1340,6 +1340,16 @@ export default function TransactionsPage() {
             <span className="mr-auto text-xs text-muted-foreground">
               {t('transactions.summaryCount', { count: data.total })}
             </span>
+            {/* Excluded (#242): transfers / investments / ignored, kept out of
+                income/expense. Hidden when nothing was excluded in range. */}
+            {data.summary.excluded > 0 && (
+              <span className="flex items-baseline gap-1.5 text-xs">
+                <span className="text-muted-foreground">{t('transactions.summaryExcluded')}</span>
+                <span className="text-sm font-semibold tabular-nums text-muted-foreground">
+                  {mask(formatCurrency(data.summary.excluded, data.summary.currency, locale))}
+                </span>
+              </span>
+            )}
             <span className="flex items-baseline gap-1.5 text-xs">
               <span className="text-muted-foreground">{t('transactions.summaryIncome')}</span>
               <span className="text-sm font-semibold tabular-nums text-emerald-600">
@@ -1362,16 +1372,6 @@ export default function TransactionsPage() {
                 {mask(formatCurrency(data.summary.net, data.summary.currency, locale))}
               </span>
             </span>
-            {/* Excluded (#242): transfers / investments / ignored, kept out of
-                income/expense. Hidden when nothing was excluded in range. */}
-            {data.summary.excluded > 0 && (
-              <span className="flex items-baseline gap-1.5 text-xs">
-                <span className="text-muted-foreground">{t('transactions.summaryExcluded')}</span>
-                <span className="text-sm font-semibold tabular-nums text-muted-foreground">
-                  {mask(formatCurrency(data.summary.excluded, data.summary.currency, locale))}
-                </span>
-              </span>
-            )}
           </div>
         )}
       </div>

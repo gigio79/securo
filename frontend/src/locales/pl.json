@@ -296,6 +296,7 @@
     "summaryIncome": "Przychody",
     "summaryExpenses": "Wydatki",
     "summaryNet": "Netto",
+    "summaryExcluded": "Wykluczone",
     "bulkCategorize": "Zastosuj",
     "bulkSuccess_one": "Skategoryzowano {{count}} transakcję",
     "bulkSuccess_few": "Skategoryzowano {{count}} transakcje",

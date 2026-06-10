@@ -18,7 +18,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { DatePickerInput } from '@/components/ui/date-picker-input'
-import type { Asset, AssetGroup, AssetValue, MarketSymbolMatch, MarketSymbolQuote } from '@/types'
+import type { Asset, AssetGroup, AssetTransaction, AssetValue, MarketSymbolMatch, MarketSymbolQuote } from '@/types'
 import {
   Home,
   Car,
@@ -186,6 +186,7 @@ export default function AssetsPage() {
     staleTime: Infinity,
   })
 
+  const [activeTab, setActiveTab] = useState<'holdings' | 'transactions'>('holdings')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -723,6 +724,13 @@ export default function AssetsPage() {
                 </Badge>
               )}
             </div>
+            {/* Ledger holdings show quantity + weighted-average cost (preço
+                médio) so the consolidated card reads like Status Invest. */}
+            {asset.average_price != null && asset.units != null && (
+              <div className="text-[11px] text-muted-foreground tabular-nums mt-0.5">
+                {mask(`${asset.units}`)} {t('assets.unitsShort')} · {t('assets.avgPriceShort')} {mask(formatCurrency(asset.average_price, asset.currency, locale))}
+              </div>
+            )}
           </div>
           <div className="text-right shrink-0">
             {asset.current_value != null ? (
@@ -945,6 +953,34 @@ export default function AssetsPage() {
         }
       />
 
+      {/* Holdings (consolidated by ticker) vs. the buy/sell ledger (#235) */}
+      <div className="inline-flex items-center rounded-lg border border-border p-0.5 bg-muted/40">
+        <button
+          onClick={() => setActiveTab('holdings')}
+          className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${activeTab === 'holdings' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+        >
+          {t('assets.tabHoldings')}
+        </button>
+        <button
+          onClick={() => setActiveTab('transactions')}
+          className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${activeTab === 'transactions' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+        >
+          {t('assets.tabTransactions')}
+        </button>
+      </div>
+
+      {activeTab === 'transactions' ? (
+        <AssetTransactionsTab
+          holdings={assetsList ?? []}
+          wallets={sortedWallets}
+          locale={locale}
+          dateLocale={dateLocale}
+          mask={mask}
+          canWrite={canWrite}
+          onChanged={refetchAssetViews}
+        />
+      ) : (
+      <>
       {/* Portfolio Stacked Area Chart */}
       {portfolioData && portfolioData.trend.length > 0 && (
         <PortfolioChart
@@ -1000,6 +1036,8 @@ export default function AssetsPage() {
             </div>
           )}
         </div>
+      )}
+      </>
       )}
 
       {/* Create/Edit Dialog */}
@@ -1987,6 +2025,348 @@ function AssetDetail({ assetId, currency, locale: loc, dateLocale: dateLoc, purc
           <p className="text-xs text-muted-foreground py-3 text-center">{t('dashboard.noData')}</p>
         )}
       </div>
+    </div>
+  )
+}
+
+// Transactions tab (issue #235): the buy/sell ledger behind the consolidated
+// holdings. Lists every transaction across the portfolio and lets users add a
+// buy (to a new or existing ticker), record a sell, or edit/delete entries.
+// Each mutation recomputes the affected holding's preço médio server-side.
+function AssetTransactionsTab({
+  holdings,
+  wallets,
+  locale,
+  dateLocale,
+  mask,
+  canWrite,
+  onChanged,
+}: {
+  holdings: Asset[]
+  wallets: AssetGroup[]
+  locale: string
+  dateLocale: string
+  mask: (v: string) => string
+  canWrite: boolean
+  onChanged: () => void
+}) {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+
+  const { data: txs, isLoading } = useQuery({
+    queryKey: ['asset-transactions'],
+    queryFn: () => assets.allTransactions(),
+  })
+
+  const marketHoldings = useMemo(
+    () => holdings.filter((h) => h.valuation_method === 'market_price' && !h.sell_date),
+    [holdings],
+  )
+
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [editingTx, setEditingTx] = useState<AssetTransaction | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  // Form state
+  const [formKind, setFormKind] = useState<'buy' | 'sell'>('buy')
+  const [formHolding, setFormHolding] = useState<string>('__new__')
+  const [formTicker, setFormTicker] = useState('')
+  const [formGroupId, setFormGroupId] = useState<string>('')
+  const [formQuantity, setFormQuantity] = useState('')
+  const [formPrice, setFormPrice] = useState('')
+  const [formFee, setFormFee] = useState('')
+  const [formDate, setFormDate] = useState<string>(new Date().toISOString().slice(0, 10))
+
+  function afterChange() {
+    queryClient.refetchQueries({ queryKey: ['asset-transactions'] })
+    onChanged()
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const quantity = parseFloat(formQuantity)
+      const price = parseFloat(formPrice)
+      const fee = formFee ? parseFloat(formFee) : 0
+      if (editingTx) {
+        return assets.updateTransaction(editingTx.id, {
+          kind: formKind,
+          quantity,
+          price,
+          fee,
+          date: formDate,
+        })
+      }
+      if (formHolding === '__new__') {
+        return assets.buy({
+          ticker: formTicker.trim().toUpperCase(),
+          quantity,
+          price,
+          fee,
+          date: formDate,
+          group_id: formGroupId || null,
+        })
+      }
+      return assets.addTransaction(formHolding, { kind: formKind, quantity, price, fee, date: formDate })
+    },
+    onSuccess: () => {
+      afterChange()
+      setDialogOpen(false)
+      setEditingTx(null)
+      toast.success(t('assets.txSaved'))
+    },
+    onError: () => toast.error(t('common.error')),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => assets.deleteTransaction(id),
+    onSuccess: () => {
+      afterChange()
+      setDeletingId(null)
+      toast.success(t('assets.txDeleted'))
+    },
+    onError: () => toast.error(t('common.error')),
+  })
+
+  function openAdd() {
+    setEditingTx(null)
+    setFormKind('buy')
+    setFormHolding(marketHoldings.length > 0 ? marketHoldings[0].id : '__new__')
+    setFormTicker('')
+    setFormGroupId('')
+    setFormQuantity('')
+    setFormPrice('')
+    setFormFee('')
+    setFormDate(new Date().toISOString().slice(0, 10))
+    setDialogOpen(true)
+  }
+
+  function openEdit(tx: AssetTransaction) {
+    setEditingTx(tx)
+    setFormKind(tx.kind)
+    setFormHolding(tx.asset_id)
+    setFormQuantity(`${tx.quantity}`)
+    setFormPrice(`${tx.price}`)
+    setFormFee(tx.fee ? `${tx.fee}` : '')
+    setFormDate(tx.date)
+    setDialogOpen(true)
+  }
+
+  const isNewTicker = !editingTx && formHolding === '__new__'
+  const canSave =
+    !!formQuantity &&
+    parseFloat(formQuantity) > 0 &&
+    !!formPrice &&
+    (isNewTicker ? !!formTicker.trim() : true) &&
+    !saveMutation.isPending
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-muted-foreground">{t('assets.txTabHint')}</p>
+        {canWrite && (
+          <Button onClick={openAdd} className="gap-1.5">
+            <Plus size={16} />
+            {t('assets.addTransaction')}
+          </Button>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-12 rounded-lg" />)}
+        </div>
+      ) : (txs ?? []).length === 0 ? (
+        <div className="text-center py-16">
+          <TrendingUp className="mx-auto h-12 w-12 text-muted-foreground/40 mb-3" />
+          <p className="text-muted-foreground">{t('assets.noTransactions')}</p>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border overflow-hidden divide-y divide-border">
+          {(txs ?? []).map((tx) => {
+            const total = tx.quantity * tx.price
+            const cur = tx.currency ?? 'USD'
+            return (
+              <div key={tx.id} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/20 transition-colors">
+                <Badge
+                  variant="outline"
+                  className={`text-[10px] px-1.5 py-0 shrink-0 ${tx.kind === 'buy' ? 'text-emerald-600 border-emerald-200' : 'text-rose-600 border-rose-200'}`}
+                >
+                  {tx.kind === 'buy' ? t('assets.txBuy') : t('assets.txSell')}
+                </Badge>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">
+                    {tx.ticker || tx.asset_name}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground tabular-nums">
+                    {new Date(tx.date + 'T00:00:00').toLocaleDateString(dateLocale)} ·{' '}
+                    {mask(`${tx.quantity}`)} × {mask(formatCurrency(tx.price, cur, locale))}
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-semibold tabular-nums text-foreground">
+                    {mask(formatCurrency(total, cur, locale))}
+                  </p>
+                  {tx.fee > 0 && (
+                    <p className="text-[10px] text-muted-foreground tabular-nums">
+                      {t('assets.txFee')} {mask(formatCurrency(tx.fee, cur, locale))}
+                    </p>
+                  )}
+                </div>
+                {canWrite && (
+                  <div className="flex items-center gap-1 shrink-0">
+                    <button
+                      onClick={() => openEdit(tx)}
+                      title={t('common.edit')}
+                      className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      onClick={() => setDeletingId(tx.id)}
+                      title={t('common.delete')}
+                      className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-50 transition-colors"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Add / Edit transaction dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingTx ? t('assets.editTransaction') : t('assets.addTransaction')}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Holding picker — only when adding (kind is locked on edit too) */}
+            {!editingTx && (
+              <div className="space-y-2">
+                <Label>{t('assets.holding')}</Label>
+                <select
+                  className="bg-card border border-border focus:outline-none focus:ring-2 focus:ring-primary px-3 py-2 rounded-lg text-foreground text-sm w-full"
+                  value={formHolding}
+                  onChange={(e) => {
+                    setFormHolding(e.target.value)
+                    if (e.target.value === '__new__') setFormKind('buy')
+                  }}
+                >
+                  <option value="__new__">{t('assets.newTicker')}</option>
+                  {marketHoldings.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.ticker || h.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {isNewTicker && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>{t('assets.ticker')}</Label>
+                  <Input
+                    value={formTicker}
+                    onChange={(e) => setFormTicker(e.target.value)}
+                    placeholder={t('assets.tickerPlaceholder')}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>{t('assets.wallet')}</Label>
+                  <select
+                    className="bg-card border border-border focus:outline-none focus:ring-2 focus:ring-primary px-3 py-2 rounded-lg text-foreground text-sm w-full"
+                    value={formGroupId}
+                    onChange={(e) => setFormGroupId(e.target.value)}
+                  >
+                    <option value="">{t('assets.noWallet')}</option>
+                    {wallets.map((w) => (
+                      <option key={w.id} value={w.id}>{w.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {/* Buy/Sell toggle — only for existing holdings (can't sell a new ticker) */}
+            {!isNewTicker && (
+              <div className="space-y-2">
+                <Label>{t('assets.txType')}</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  {(['buy', 'sell'] as const).map((k) => (
+                    <button
+                      key={k}
+                      type="button"
+                      className={`px-3 py-2 rounded-lg text-sm font-medium border transition-all ${formKind === k ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/50'}`}
+                      onClick={() => setFormKind(k)}
+                    >
+                      {k === 'buy' ? t('assets.txBuy') : t('assets.txSell')}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>{t('assets.quantity')}</Label>
+                <Input type="number" step="any" min="0" value={formQuantity} onChange={(e) => setFormQuantity(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>{t('assets.unitPrice')}</Label>
+                <Input type="number" step="any" min="0" value={formPrice} onChange={(e) => setFormPrice(e.target.value)} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>{t('assets.fee')}</Label>
+                <Input type="number" step="any" min="0" value={formFee} onChange={(e) => setFormFee(e.target.value)} placeholder="0" />
+              </div>
+              <div className="space-y-2">
+                <Label>{t('assets.date')}</Label>
+                <DatePickerInput value={formDate} onChange={setFormDate} />
+              </div>
+            </div>
+
+            {formQuantity && formPrice && parseFloat(formQuantity) > 0 && (
+              <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/30">
+                <span className="text-xs font-medium text-muted-foreground">{t('assets.txTotal')}</span>
+                <span className="text-sm font-bold tabular-nums text-foreground">
+                  {formatCurrency(
+                    parseFloat(formQuantity) * parseFloat(formPrice) + (formFee ? parseFloat(formFee) : 0) * (formKind === 'buy' ? 1 : -1),
+                    'USD',
+                    locale,
+                  )}
+                </span>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>{t('common.cancel')}</Button>
+            <Button onClick={() => saveMutation.mutate()} disabled={!canSave}>{t('common.save')}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation */}
+      <Dialog open={!!deletingId} onOpenChange={() => setDeletingId(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('assets.confirmDeleteTxTitle')}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">{t('assets.confirmDeleteTx')}</p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeletingId(null)}>{t('common.cancel')}</Button>
+            <Button variant="destructive" onClick={() => deletingId && deleteMutation.mutate(deletingId)} disabled={deleteMutation.isPending}>
+              {t('common.delete')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

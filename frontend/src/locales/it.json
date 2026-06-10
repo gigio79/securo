@@ -840,6 +840,8 @@
   "assets": {
     "title": "Beni",
     "addAsset": "Aggiungi bene",
+    "noPriceBadge": "senza prezzo",
+    "noPriceWarning": "Aggiunto senza prezzo di acquisto — aggiungi i tuoi acquisti per tracciare prezzo medio e rendimento.",
     "colAsset": "Attività",
     "colQuantity": "Qtà",
     "colAvgPrice": "Prezzo medio",

@@ -867,6 +867,8 @@
   "assets": {
     "title": "Patrimônio",
     "addAsset": "Adicionar Ativo",
+    "noPriceBadge": "sem preço",
+    "noPriceWarning": "Adicionado sem preço de compra — adicione suas compras para acompanhar o preço médio e a rentabilidade.",
     "colAsset": "Ativo",
     "colQuantity": "Qtd.",
     "colAvgPrice": "Preço médio",

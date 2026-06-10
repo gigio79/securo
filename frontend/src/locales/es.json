@@ -865,6 +865,8 @@
   "assets": {
     "title": "Activos",
     "addAsset": "Agregar activo",
+    "noPriceBadge": "sin precio",
+    "noPriceWarning": "Añadido sin precio de compra — añade tus compras para seguir el precio medio y la rentabilidad.",
     "colAsset": "Activo",
     "colQuantity": "Cant.",
     "colAvgPrice": "Precio medio",

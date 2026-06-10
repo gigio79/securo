@@ -936,6 +936,8 @@
   "assets": {
     "title": "Aktywa",
     "addAsset": "Dodaj aktywo",
+    "noPriceBadge": "bez ceny",
+    "noPriceWarning": "Dodano bez ceny zakupu — dodaj swoje zakupy, aby śledzić średnią cenę i zwrot.",
     "colAsset": "Aktywo",
     "colQuantity": "Ilość",
     "colAvgPrice": "Śr. cena",

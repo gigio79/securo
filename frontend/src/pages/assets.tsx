@@ -170,6 +170,10 @@ const VALUATION_METHODS = ['manual', 'growth_rule', 'market_price'] as const
 const GROWTH_TYPES = ['percentage', 'absolute'] as const
 const GROWTH_FREQUENCIES = ['daily', 'weekly', 'monthly', 'yearly'] as const
 
+// Column template shared by the holdings table header + rows so they align:
+// Ativo · Quant. · Preço Médio · Preço Atual · Rentab. · Saldo · % · actions.
+const HOLDINGS_GRID = 'minmax(0,2.4fr) 0.7fr 1.1fr 1fr 0.9fr 1.3fr 0.6fr 4.5rem'
+
 export default function AssetsPage() {
   const { t } = useTranslation()
   const locale = useDisplayLocale()
@@ -187,6 +191,10 @@ export default function AssetsPage() {
   })
 
   const [activeTab, setActiveTab] = useState<'holdings' | 'transactions'>('holdings')
+  // Holding id for the lightweight "add transaction to this holding" dialog,
+  // opened from the holdings table ("+ add buys") and the inline ledger.
+  const [addTxAssetId, setAddTxAssetId] = useState<string | null>(null)
+  const openAddTransaction = (id: string) => setAddTxAssetId(id)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
@@ -279,6 +287,12 @@ export default function AssetsPage() {
   // wallets?" without needing the user to spell it out.
   const totalValue = (assetsList ?? []).reduce(
     (acc: number, a: { current_value?: number | null }) => acc + Number(a.current_value || 0),
+    0,
+  )
+  // Portfolio total in the user's primary currency — denominator for the
+  // "% da carteira" column in the holdings table.
+  const portfolioTotalPrimary = (assetsList ?? []).reduce(
+    (acc, a) => acc + Number(a.current_value_primary ?? a.current_value ?? 0),
     0,
   )
   const byType: Record<string, number> = {}
@@ -657,140 +671,162 @@ export default function AssetsPage() {
     setPendingGrowthSave(null)
   }
 
-  function renderAssetCard(asset: Asset) {
+  // Consolidated holdings table (issue #235). One row per holding (ticker),
+  // Investidor10/Status Invest style: Ativo · Quant. · Preço Médio ·
+  // Preço Atual · Rentabilidade · Saldo · % da carteira. Market-priced rows
+  // are fully populated; holdings with no recorded cost show "—" for the
+  // cost-based columns and offer a one-tap way to add their buys.
+  function renderHoldingRow(asset: Asset) {
     const config = getTypeConfig(asset.type)
     const Icon = config.icon
     const isExpanded = expandedId === asset.id
     const isSynced = asset.source !== 'manual'
-    // Split "externally-owned" (bank/brokerage record — gets overwritten on
-    // re-sync, so read-only for users) from "market-priced" (user-created
-    // record where only the cached price syncs). We key on valuation_method
-    // rather than the concrete source string so swapping the price provider
-    // (yfinance → anything else) doesn't break this logic.
     const isMarketPriced = asset.valuation_method === 'market_price'
     const isProviderOwned = isSynced && !isMarketPriced
+    const hasCost = asset.average_price != null && asset.total_invested != null
+    const returnPct =
+      hasCost && asset.gain_loss != null && asset.total_invested
+        ? (asset.gain_loss / asset.total_invested) * 100
+        : null
+    const pctOfPortfolio =
+      portfolioTotalPrimary > 0 && asset.current_value_primary != null
+        ? (asset.current_value_primary / portfolioTotalPrimary) * 100
+        : null
+    const needsBuys = isMarketPriced && !hasCost && !asset.sell_date
 
     return (
-      <div key={asset.id} className="border border-border rounded-xl bg-card shadow-sm overflow-hidden">
+      <div key={asset.id} className="border-b border-border last:border-b-0">
         <div
-          className="flex items-center gap-4 px-5 py-4 cursor-pointer hover:bg-muted/30 transition-colors"
+          className="grid items-center gap-2 px-3 py-3 cursor-pointer hover:bg-muted/20 transition-colors text-sm"
+          style={{ gridTemplateColumns: HOLDINGS_GRID }}
           onClick={() => setExpandedId(isExpanded ? null : asset.id)}
         >
-          <AssetIcon
-            logoUrl={asset.logo_url}
-            Icon={Icon}
-            colorClass={config.color}
-            bgClass={config.bg}
-          />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-foreground truncate">{asset.name}</span>
-              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                {t(`assets.type${asset.type.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase()).replace(/^./, c => c.toUpperCase())}`)}
-              </Badge>
-              {isMarketPriced ? (
-                <Badge
-                  variant="outline"
-                  className="text-[10px] px-1.5 py-0 text-primary border-primary/30 gap-1"
-                  title={t('assets.marketPriceSourceTooltip')}
-                >
-                  <TrendingUp size={9} />
-                  {t('assets.marketPriceSource')}
-                </Badge>
-              ) : isSynced ? (
-                <Badge
-                  variant="outline"
-                  className="text-[10px] px-1.5 py-0 text-sky-600 border-sky-200 gap-1"
-                  title={t('assets.syncedFrom', { source: asset.source })}
-                >
-                  <RefreshCw size={9} />
-                  {t('assets.synced')}
-                </Badge>
-              ) : null}
-              {asset.maturity_date && (
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground">
-                  {t('assets.maturesOn', { date: new Date(asset.maturity_date).toLocaleDateString(dateLocale) })}
-                </Badge>
-              )}
-              {asset.valuation_method === 'growth_rule' && asset.growth_rate && (
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-emerald-600 border-emerald-200">
-                  +{asset.growth_type === 'percentage' ? `${asset.growth_rate}%` : formatCurrency(asset.growth_rate, asset.currency, locale)}
-                  /{t(`assets.${asset.growth_frequency}`).toLowerCase().charAt(0)}
-                </Badge>
-              )}
-              {asset.sell_date && (
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-rose-600 border-rose-200">
-                  {t('assets.sold')}
-                </Badge>
-              )}
-            </div>
-            {/* Ledger holdings show quantity + weighted-average cost (preço
-                médio) so the consolidated card reads like Status Invest. */}
-            {asset.average_price != null && asset.units != null && (
-              <div className="text-[11px] text-muted-foreground tabular-nums mt-0.5">
-                {mask(`${asset.units}`)} {t('assets.unitsShort')} · {t('assets.avgPriceShort')} {mask(formatCurrency(asset.average_price, asset.currency, locale))}
+          {/* Ativo */}
+          <div className="flex items-center gap-2.5 min-w-0">
+            <AssetIcon logoUrl={asset.logo_url} Icon={Icon} colorClass={config.color} bgClass={config.bg} size={16} tile="w-8 h-8" />
+            <div className="min-w-0">
+              <div className="flex items-center gap-1.5">
+                <span className="font-semibold text-foreground truncate">{asset.ticker || asset.name}</span>
+                {asset.sell_date && (
+                  <Badge variant="outline" className="text-[9px] px-1 py-0 text-rose-600 border-rose-200">{t('assets.sold')}</Badge>
+                )}
+                {isSynced && !isMarketPriced && (
+                  <Badge variant="outline" className="text-[9px] px-1 py-0 text-sky-600 border-sky-200">{t('assets.synced')}</Badge>
+                )}
               </div>
+              <span className="text-[11px] text-muted-foreground truncate block">{asset.ticker ? asset.name : t(`assets.type${asset.type.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase()).replace(/^./, c => c.toUpperCase())}`)}</span>
+            </div>
+          </div>
+          {/* Quant. */}
+          <div className="text-right tabular-nums text-muted-foreground">
+            {asset.units != null ? mask(`${asset.units}`) : '—'}
+          </div>
+          {/* Preço Médio */}
+          <div className="text-right tabular-nums">
+            {asset.average_price != null ? mask(formatCurrency(asset.average_price, asset.currency, locale)) : (
+              needsBuys && canWrite ? (
+                <button
+                  onClick={(e) => { e.stopPropagation(); openAddTransaction(asset.id) }}
+                  className="text-[11px] font-medium text-primary hover:underline"
+                >
+                  + {t('assets.addBuys')}
+                </button>
+              ) : <span className="text-muted-foreground">—</span>
             )}
           </div>
-          <div className="text-right shrink-0">
+          {/* Preço Atual */}
+          <div className="text-right tabular-nums text-muted-foreground">
+            {asset.last_price != null ? mask(formatCurrency(asset.last_price, asset.currency, locale)) : '—'}
+          </div>
+          {/* Rentabilidade */}
+          <div className="text-right tabular-nums">
+            {returnPct != null ? (
+              <span className={returnPct >= 0 ? 'text-emerald-600' : 'text-rose-500'}>
+                {returnPct >= 0 ? '+' : ''}{returnPct.toFixed(1)}%
+              </span>
+            ) : <span className="text-muted-foreground">—</span>}
+          </div>
+          {/* Saldo */}
+          <div className="text-right tabular-nums">
             {asset.current_value != null ? (
               <>
-                <p className="text-sm font-bold tabular-nums text-foreground">
-                  {mask(formatCurrency(asset.current_value, asset.currency, locale))}
-                  {asset.current_value_primary != null && (
-                    <span className="text-[10px] font-medium text-muted-foreground ml-1">
-                      ({mask(formatCurrency(asset.current_value_primary, userCurrency, locale))})
-                    </span>
-                  )}
-                </p>
-                {asset.gain_loss != null && (
-                  <p className={`text-xs font-medium tabular-nums ${asset.gain_loss >= 0 ? 'text-emerald-600' : 'text-rose-500'}`}>
-                    {mask(`${asset.gain_loss >= 0 ? '+' : ''}${formatCurrency(asset.gain_loss, asset.currency, locale)}`)}
-                    {asset.gain_loss_primary != null && (
-                      <span className="text-[10px] text-muted-foreground ml-1">
-                        ({mask(formatCurrency(asset.gain_loss_primary, userCurrency, locale))})
-                      </span>
-                    )}
-                  </p>
+                <span className="font-semibold text-foreground">{mask(formatCurrency(asset.current_value, asset.currency, locale))}</span>
+                {asset.current_value_primary != null && asset.currency !== userCurrency && (
+                  <span className="block text-[10px] text-muted-foreground">{mask(formatCurrency(asset.current_value_primary, userCurrency, locale))}</span>
                 )}
               </>
-            ) : (
-              <p className="text-sm text-muted-foreground">—</p>
-            )}
+            ) : <span className="text-muted-foreground">—</span>}
           </div>
-          <div className="flex items-center gap-1 shrink-0">
+          {/* % carteira */}
+          <div className="text-right tabular-nums text-muted-foreground">
+            {pctOfPortfolio != null ? `${pctOfPortfolio.toFixed(1)}%` : '—'}
+          </div>
+          {/* actions */}
+          <div className="flex items-center justify-end gap-0.5">
             {canWrite && (
               <>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setMovingAsset(asset) }}
-                  title={t('assets.moveToWallet')}
-                  className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                >
-                  <FolderInput size={14} />
+                <button onClick={(e) => { e.stopPropagation(); setMovingAsset(asset) }} title={t('assets.moveToWallet')} className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                  <FolderInput size={13} />
                 </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); if (!isProviderOwned) openEdit(asset) }}
-                  disabled={isProviderOwned}
-                  title={isProviderOwned ? t('assets.syncedReadOnly') : undefined}
-                  className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                >
-                  <Pencil size={14} />
+                <button onClick={(e) => { e.stopPropagation(); if (!isProviderOwned) openEdit(asset) }} disabled={isProviderOwned} title={isProviderOwned ? t('assets.syncedReadOnly') : undefined} className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                  <Pencil size={13} />
                 </button>
-                <button
-                  onClick={(e) => { e.stopPropagation(); if (!isProviderOwned) setDeletingId(asset.id) }}
-                  disabled={isProviderOwned}
-                  title={isProviderOwned ? t('assets.syncedReadOnly') : undefined}
-                  className="p-1.5 rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:bg-transparent"
-                >
-                  <Trash2 size={14} />
+                <button onClick={(e) => { e.stopPropagation(); if (!isProviderOwned) setDeletingId(asset.id) }} disabled={isProviderOwned} title={isProviderOwned ? t('assets.syncedReadOnly') : undefined} className="p-1 rounded text-muted-foreground hover:text-rose-600 hover:bg-rose-50 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                  <Trash2 size={13} />
                 </button>
               </>
             )}
-            {isExpanded ? <ChevronUp size={16} className="text-muted-foreground" /> : <ChevronDown size={16} className="text-muted-foreground" />}
+            {isExpanded ? <ChevronUp size={15} className="text-muted-foreground" /> : <ChevronDown size={15} className="text-muted-foreground" />}
           </div>
         </div>
 
-        {isExpanded && <AssetDetail assetId={asset.id} currency={asset.currency} locale={locale} dateLocale={dateLocale} purchasePrice={asset.purchase_price} purchaseDate={asset.purchase_date} valuationMethod={asset.valuation_method} canWrite={canWrite} />}
+        {isExpanded && (
+          isMarketPriced ? (
+            <HoldingLedger
+              asset={asset}
+              locale={locale}
+              dateLocale={dateLocale}
+              mask={mask}
+              canWrite={canWrite}
+              onAdd={() => openAddTransaction(asset.id)}
+              onChanged={refetchAssetViews}
+            />
+          ) : (
+            <AssetDetail assetId={asset.id} currency={asset.currency} locale={locale} dateLocale={dateLocale} purchasePrice={asset.purchase_price} purchaseDate={asset.purchase_date} valuationMethod={asset.valuation_method} canWrite={canWrite} />
+          )
+        )}
+      </div>
+    )
+  }
+
+  // Column header for a holdings section — same grid template as the rows.
+  function renderHoldingsHeader() {
+    return (
+      <div
+        className="grid items-center gap-2 px-3 py-2 text-[10px] font-semibold text-muted-foreground uppercase tracking-wider border-b border-border"
+        style={{ gridTemplateColumns: HOLDINGS_GRID }}
+      >
+        <div>{t('assets.colAsset')}</div>
+        <div className="text-right">{t('assets.colQuantity')}</div>
+        <div className="text-right">{t('assets.colAvgPrice')}</div>
+        <div className="text-right">{t('assets.colCurrentPrice')}</div>
+        <div className="text-right">{t('assets.colReturn')}</div>
+        <div className="text-right">{t('assets.colBalance')}</div>
+        <div className="text-right">{t('assets.colPortfolioPct')}</div>
+        <div />
+      </div>
+    )
+  }
+
+  // Wrap a set of holding rows in a horizontally-scrollable table shell so the
+  // columns stay aligned (and usable on narrow screens).
+  function renderHoldingsTable(rows: Asset[]) {
+    return (
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-x-auto">
+        <div className="min-w-[720px]">
+          {renderHoldingsHeader()}
+          {rows.map(renderHoldingRow)}
+        </div>
       </div>
     )
   }
@@ -919,8 +955,8 @@ export default function AssetsPage() {
           )}
         </div>
         {!isCollapsed && walletAssets.length > 0 && (
-          <div className="space-y-2 pl-4">
-            {walletAssets.map(renderAssetCard)}
+          <div className="pl-4">
+            {renderHoldingsTable(walletAssets)}
           </div>
         )}
         {!isCollapsed && walletAssets.length === 0 && (
@@ -1009,9 +1045,7 @@ export default function AssetsPage() {
                   <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
                     {sortedWallets.length > 0 ? t('assets.ungrouped') : t('assets.activeAssets')}
                   </h3>
-                  <div className="space-y-2">
-                    {ungroupedAssets.map(renderAssetCard)}
-                  </div>
+                  {renderHoldingsTable(ungroupedAssets)}
                 </div>
               )}
             </div>
@@ -1023,9 +1057,7 @@ export default function AssetsPage() {
               <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
                 {t('assets.soldAssets')}
               </h3>
-              <div className="space-y-2">
-                {soldAssets.map(renderAssetCard)}
-              </div>
+              {renderHoldingsTable(soldAssets)}
             </div>
           )}
 
@@ -1556,6 +1588,17 @@ export default function AssetsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Add a buy/sell to an existing holding (from the holdings table /
+          inline ledger). Brand-new tickers go through Add Asset / the
+          Transactions tab. */}
+      <AddHoldingTransactionDialog
+        assetId={addTxAssetId}
+        holding={(assetsList ?? []).find((a) => a.id === addTxAssetId) ?? null}
+        locale={locale}
+        onClose={() => setAddTxAssetId(null)}
+        onChanged={refetchAssetViews}
+      />
     </div>
   )
 }
@@ -2368,5 +2411,211 @@ function AssetTransactionsTab({
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+// Inline buy/sell ledger shown when a holding row is expanded (the
+// "Lançamentos" of the reference). Lists the holding's transactions and
+// offers a one-tap add — the consolidated row above is recomputed server-side.
+function HoldingLedger({
+  asset,
+  locale,
+  dateLocale,
+  mask,
+  canWrite,
+  onAdd,
+  onChanged,
+}: {
+  asset: Asset
+  locale: string
+  dateLocale: string
+  mask: (v: string) => string
+  canWrite: boolean
+  onAdd: () => void
+  onChanged: () => void
+}) {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const { data: txs, isLoading } = useQuery({
+    queryKey: ['asset-transactions', asset.id],
+    queryFn: () => assets.transactions(asset.id),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => assets.deleteTransaction(id),
+    onSuccess: () => {
+      queryClient.refetchQueries({ queryKey: ['asset-transactions', asset.id] })
+      queryClient.refetchQueries({ queryKey: ['asset-transactions'] })
+      onChanged()
+      toast.success(t('assets.txDeleted'))
+    },
+    onError: () => toast.error(t('common.error')),
+  })
+
+  return (
+    <div className="border-t border-border bg-muted/10 px-4 py-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+          {t('assets.ledgerTitle')}
+        </p>
+        {canWrite && (
+          <Button size="sm" variant="outline" className="h-7 px-2 text-xs gap-1" onClick={onAdd}>
+            <Plus size={13} />
+            {t('assets.addTransaction')}
+          </Button>
+        )}
+      </div>
+      {isLoading ? (
+        <Skeleton className="h-16 w-full rounded-lg" />
+      ) : (txs ?? []).length === 0 ? (
+        <p className="text-xs text-muted-foreground py-2">{t('assets.noLedgerYet')}</p>
+      ) : (
+        <div className="rounded-lg border border-border overflow-hidden divide-y divide-border bg-card">
+          {(txs ?? []).map((tx) => (
+            <div key={tx.id} className="flex items-center gap-3 px-3 py-2">
+              <Badge
+                variant="outline"
+                className={`text-[9px] px-1 py-0 shrink-0 ${tx.kind === 'buy' ? 'text-emerald-600 border-emerald-200' : 'text-rose-600 border-rose-200'}`}
+              >
+                {tx.kind === 'buy' ? t('assets.txBuy') : t('assets.txSell')}
+              </Badge>
+              <span className="text-[11px] text-muted-foreground tabular-nums flex-1">
+                {new Date(tx.date + 'T00:00:00').toLocaleDateString(dateLocale)} ·{' '}
+                {mask(`${tx.quantity}`)} × {mask(formatCurrency(tx.price, asset.currency, locale))}
+              </span>
+              <span className="text-xs font-semibold tabular-nums text-foreground">
+                {mask(formatCurrency(tx.quantity * tx.price, asset.currency, locale))}
+              </span>
+              {canWrite && (
+                <button
+                  onClick={() => deleteMutation.mutate(tx.id)}
+                  disabled={deleteMutation.isPending}
+                  className="p-1 rounded text-muted-foreground/50 hover:text-rose-600 transition-colors"
+                >
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Lightweight dialog to add a buy/sell to an already-existing holding. Used by
+// the holdings table ("+ add buys") and the inline ledger.
+function AddHoldingTransactionDialog({
+  assetId,
+  holding,
+  locale,
+  onClose,
+  onChanged,
+}: {
+  assetId: string | null
+  holding: Asset | null
+  locale: string
+  onClose: () => void
+  onChanged: () => void
+}) {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const [kind, setKind] = useState<'buy' | 'sell'>('buy')
+  const [quantity, setQuantity] = useState('')
+  const [price, setPrice] = useState('')
+  const [fee, setFee] = useState('')
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+
+  useEffect(() => {
+    if (assetId) {
+      setKind('buy')
+      setQuantity('')
+      setPrice('')
+      setFee('')
+      setDate(new Date().toISOString().slice(0, 10))
+    }
+  }, [assetId])
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      assets.addTransaction(assetId!, {
+        kind,
+        quantity: parseFloat(quantity),
+        price: parseFloat(price),
+        fee: fee ? parseFloat(fee) : 0,
+        date,
+      }),
+    onSuccess: () => {
+      queryClient.refetchQueries({ queryKey: ['asset-transactions'] })
+      if (assetId) queryClient.refetchQueries({ queryKey: ['asset-transactions', assetId] })
+      onChanged()
+      onClose()
+      toast.success(t('assets.txSaved'))
+    },
+    onError: () => toast.error(t('common.error')),
+  })
+
+  const cur = holding?.currency ?? 'USD'
+  const canSave = !!quantity && parseFloat(quantity) > 0 && !!price && !saveMutation.isPending
+
+  return (
+    <Dialog open={!!assetId} onOpenChange={(o) => { if (!o) onClose() }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>
+            {t('assets.addTransaction')}{holding ? ` · ${holding.ticker || holding.name}` : ''}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label>{t('assets.txType')}</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {(['buy', 'sell'] as const).map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  className={`px-3 py-2 rounded-lg text-sm font-medium border transition-all ${kind === k ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/50'}`}
+                  onClick={() => setKind(k)}
+                >
+                  {k === 'buy' ? t('assets.txBuy') : t('assets.txSell')}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>{t('assets.quantity')}</Label>
+              <Input type="number" step="any" min="0" value={quantity} onChange={(e) => setQuantity(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>{t('assets.unitPrice')}</Label>
+              <Input type="number" step="any" min="0" value={price} onChange={(e) => setPrice(e.target.value)} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>{t('assets.fee')}</Label>
+              <Input type="number" step="any" min="0" value={fee} onChange={(e) => setFee(e.target.value)} placeholder="0" />
+            </div>
+            <div className="space-y-2">
+              <Label>{t('assets.date')}</Label>
+              <DatePickerInput value={date} onChange={setDate} />
+            </div>
+          </div>
+          {quantity && price && parseFloat(quantity) > 0 && (
+            <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/30">
+              <span className="text-xs font-medium text-muted-foreground">{t('assets.txTotal')}</span>
+              <span className="text-sm font-bold tabular-nums text-foreground">
+                {formatCurrency(parseFloat(quantity) * parseFloat(price) + (fee ? parseFloat(fee) : 0) * (kind === 'buy' ? 1 : -1), cur, locale)}
+              </span>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button onClick={() => saveMutation.mutate()} disabled={!canSave}>{t('common.save')}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }

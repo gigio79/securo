@@ -80,6 +80,55 @@ def _recompute(transactions: list[AssetTransaction]) -> dict:
     }
 
 
+def _detect_oversell(transactions: list[AssetTransaction]) -> Optional[tuple[Decimal, Decimal]]:
+    """Replay the ledger in date order and return the first sell that exceeds
+    the units held at that point as (attempted, available), else None.
+
+    We keep the portfolio buy-and-hold: a position can't go negative (no
+    shorting), so an over-sell is rejected rather than silently clamped.
+    """
+    txs = sorted(
+        transactions,
+        key=lambda t: (t.date, t.created_at or datetime.min.replace(tzinfo=timezone.utc)),
+    )
+    qty = Decimal("0")
+    for tx in txs:
+        q = _d(tx.quantity)
+        if tx.kind == "buy":
+            qty += q
+        elif tx.kind == "sell":
+            if q > qty:
+                return (q, qty)
+            qty -= q
+    return None
+
+
+async def _load_txs(session: AsyncSession, asset_id: uuid.UUID) -> list[AssetTransaction]:
+    result = await session.execute(
+        select(AssetTransaction).where(AssetTransaction.asset_id == asset_id)
+    )
+    return list(result.scalars().all())
+
+
+def _raise_if_oversell(transactions: list[AssetTransaction]) -> None:
+    """Reject a ledger that would drive the position negative (no shorting).
+
+    Checked in-memory on the prospective ledger before any insert, so a
+    rejected transaction never touches the DB.
+    """
+    over = _detect_oversell(transactions)
+    if over is not None:
+        attempted, available = over
+        fmt = lambda q: f"{q:.6f}".rstrip("0").rstrip(".")  # noqa: E731
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Cannot sell {fmt(attempted)} units — only {fmt(available)} held at that date. "
+                "Short positions aren't supported."
+            ),
+        )
+
+
 async def recompute_and_cache(session: AsyncSession, asset: Asset) -> None:
     """Recompute the derived position from the ledger and cache it on the asset.
 
@@ -209,19 +258,21 @@ async def add_transaction(
     if asset is None:
         return None
     _validate(data.kind, data.quantity, data.price)
-    session.add(
-        AssetTransaction(
-            asset_id=asset.id,
-            workspace_id=workspace_id,
-            kind=data.kind,
-            quantity=data.quantity,
-            price=data.price,
-            fee=data.fee or Decimal("0"),
-            date=data.date,
-            source="manual",
-            notes=data.notes,
-        )
+    new_tx = AssetTransaction(
+        asset_id=asset.id,
+        workspace_id=workspace_id,
+        kind=data.kind,
+        quantity=data.quantity,
+        price=data.price,
+        fee=data.fee or Decimal("0"),
+        date=data.date,
+        source="manual",
+        notes=data.notes,
+        created_at=datetime.now(timezone.utc),
     )
+    if data.kind == "sell":
+        _raise_if_oversell(await _load_txs(session, asset.id) + [new_tx])
+    session.add(new_tx)
     await session.flush()
     await recompute_and_cache(session, asset)
     await session.commit()
@@ -243,6 +294,19 @@ async def update_transaction(
     if tx is None:
         return None
     fields = data.model_dump(exclude_unset=True)
+    # Validate the prospective ledger before mutating the row — editing a buy
+    # down or a sell up could drive the position negative.
+    others = [t for t in await _load_txs(session, tx.asset_id) if t.id != tx.id]
+    edited = AssetTransaction(
+        asset_id=tx.asset_id,
+        kind=fields.get("kind", tx.kind),
+        quantity=fields.get("quantity", tx.quantity),
+        price=fields.get("price", tx.price),
+        date=fields.get("date", tx.date),
+        created_at=tx.created_at,
+    )
+    _raise_if_oversell(others + [edited])
+
     for key, value in fields.items():
         setattr(tx, key, value)
     _validate(tx.kind, _d(tx.quantity), _d(tx.price))

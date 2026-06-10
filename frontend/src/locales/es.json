@@ -865,6 +865,7 @@
   "assets": {
     "title": "Activos",
     "addAsset": "Agregar activo",
+    "oversellWarning": "Solo tienes {{available}} unidades — no se admiten posiciones cortas.",
     "noPriceBadge": "sin precio",
     "noPriceWarning": "Añadido sin precio de compra — añade tus compras para seguir el precio medio y la rentabilidad.",
     "colAsset": "Activo",

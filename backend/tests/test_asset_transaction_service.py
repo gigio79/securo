@@ -202,6 +202,50 @@ async def test_update_transaction_recomputes(session, test_workspace, market_ass
 
 
 @pytest.mark.asyncio
+async def test_oversell_is_rejected(session, test_workspace, market_asset):
+    from fastapi import HTTPException
+
+    await asset_transaction_service.add_transaction(
+        session, market_asset.id, test_workspace.id,
+        AssetTransactionCreate(kind="buy", quantity=Decimal("10"), price=Decimal("20"), date=date(2026, 1, 1)),
+    )
+    with pytest.raises(HTTPException) as exc:
+        await asset_transaction_service.add_transaction(
+            session, market_asset.id, test_workspace.id,
+            AssetTransactionCreate(kind="sell", quantity=Decimal("11"), price=Decimal("30"), date=date(2026, 2, 1)),
+        )
+    assert exc.value.status_code == 422
+    # The rejected sell must not have changed the position.
+    txs = await asset_transaction_service.list_asset_transactions(session, market_asset.id, test_workspace.id)
+    assert len(txs) == 1
+
+
+@pytest.mark.asyncio
+async def test_sell_exact_holding_is_allowed(session, test_workspace, market_asset):
+    await asset_transaction_service.add_transaction(
+        session, market_asset.id, test_workspace.id,
+        AssetTransactionCreate(kind="buy", quantity=Decimal("10"), price=Decimal("20"), date=date(2026, 1, 1)),
+    )
+    read = await asset_transaction_service.add_transaction(
+        session, market_asset.id, test_workspace.id,
+        AssetTransactionCreate(kind="sell", quantity=Decimal("10"), price=Decimal("30"), date=date(2026, 2, 1)),
+    )
+    assert read.units == 0
+
+
+@pytest.mark.asyncio
+async def test_sell_before_any_buy_is_rejected(session, test_workspace, market_asset):
+    from fastapi import HTTPException
+
+    with pytest.raises(HTTPException) as exc:
+        await asset_transaction_service.add_transaction(
+            session, market_asset.id, test_workspace.id,
+            AssetTransactionCreate(kind="sell", quantity=Decimal("5"), price=Decimal("30"), date=date(2026, 1, 1)),
+        )
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_full_exit_marks_sold(session, test_workspace, market_asset):
     await asset_transaction_service.add_transaction(
         session, market_asset.id, test_workspace.id,

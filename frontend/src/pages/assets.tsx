@@ -2225,11 +2225,17 @@ function AssetTransactionsTab({
   }
 
   const isNewTicker = !editingTx && formHolding === '__new__'
+  // Warn before a sell that exceeds the held quantity (no shorting). Only on a
+  // fresh sell into an existing holding; edits are validated server-side.
+  const selectedHeldUnits = marketHoldings.find((h) => h.id === formHolding)?.units ?? 0
+  const oversell =
+    !editingTx && !isNewTicker && formKind === 'sell' && !!formQuantity && parseFloat(formQuantity) > selectedHeldUnits
   const canSave =
     !!formQuantity &&
     parseFloat(formQuantity) > 0 &&
     !!formPrice &&
     (isNewTicker ? !!formTicker.trim() : true) &&
+    !oversell &&
     !saveMutation.isPending
 
   return (
@@ -2440,6 +2446,12 @@ function AssetTransactionsTab({
               </div>
             </div>
 
+            {oversell && (
+              <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+                <AlertTriangle size={13} className="shrink-0" />
+                {t('assets.oversellWarning', { available: selectedHeldUnits })}
+              </p>
+            )}
             {formQuantity && formPrice && parseFloat(formQuantity) > 0 && (
               <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/30">
                 <span className="text-xs font-medium text-muted-foreground">{t('assets.txTotal')}</span>
@@ -2621,7 +2633,9 @@ function AddHoldingTransactionDialog({
   })
 
   const cur = holding?.currency ?? 'USD'
-  const canSave = !!quantity && parseFloat(quantity) > 0 && !!price && !saveMutation.isPending
+  const heldUnits = holding?.units ?? 0
+  const oversell = kind === 'sell' && !!quantity && parseFloat(quantity) > heldUnits
+  const canSave = !!quantity && parseFloat(quantity) > 0 && !!price && !oversell && !saveMutation.isPending
 
   return (
     <Dialog open={!!assetId} onOpenChange={(o) => { if (!o) onClose() }}>
@@ -2667,6 +2681,12 @@ function AddHoldingTransactionDialog({
               <DatePickerInput value={date} onChange={setDate} />
             </div>
           </div>
+          {oversell && (
+            <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+              <AlertTriangle size={13} className="shrink-0" />
+              {t('assets.oversellWarning', { available: heldUnits })}
+            </p>
+          )}
           {quantity && price && parseFloat(quantity) > 0 && (
             <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/30">
               <span className="text-xs font-medium text-muted-foreground">{t('assets.txTotal')}</span>

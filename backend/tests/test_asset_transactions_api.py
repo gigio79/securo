@@ -157,5 +157,24 @@ async def test_add_transaction_zero_quantity_422(client: AsyncClient, auth_heade
 
 
 @pytest.mark.asyncio
+async def test_oversell_rejected_via_api(client: AsyncClient, auth_headers: dict, market_asset_api: Asset):
+    await client.post(
+        f"/api/assets/{market_asset_api.id}/transactions",
+        headers=auth_headers,
+        json={"kind": "buy", "quantity": 10, "price": 20, "date": "2026-01-01"},
+    )
+    r = await client.post(
+        f"/api/assets/{market_asset_api.id}/transactions",
+        headers=auth_headers,
+        json={"kind": "sell", "quantity": 11, "price": 30, "date": "2026-02-01"},
+    )
+    assert r.status_code == 422
+    assert "only" in r.json()["detail"].lower()
+    # Rejected sell left no trace — still just the one buy.
+    r2 = await client.get(f"/api/assets/{market_asset_api.id}/transactions", headers=auth_headers)
+    assert len(r2.json()) == 1
+
+
+@pytest.mark.asyncio
 async def test_transactions_require_auth(client: AsyncClient):
     assert (await client.get("/api/assets/transactions")).status_code == 401

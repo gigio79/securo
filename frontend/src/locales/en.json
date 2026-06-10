@@ -867,6 +867,7 @@
   "assets": {
     "title": "Assets",
     "addAsset": "Add Asset",
+    "oversellWarning": "You only hold {{available}} units — short positions aren’t supported.",
     "noPriceBadge": "no cost",
     "noPriceWarning": "Added without a purchase price — add your buys to track average price and return.",
     "colAsset": "Asset",

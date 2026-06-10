@@ -936,6 +936,7 @@
   "assets": {
     "title": "Aktywa",
     "addAsset": "Dodaj aktywo",
+    "oversellWarning": "Masz tylko {{available}} jednostek — pozycje krótkie nie są obsługiwane.",
     "noPriceBadge": "bez ceny",
     "noPriceWarning": "Dodano bez ceny zakupu — dodaj swoje zakupy, aby śledzić średnią cenę i zwrot.",
     "colAsset": "Aktywo",

@@ -840,6 +840,7 @@
   "assets": {
     "title": "Beni",
     "addAsset": "Aggiungi bene",
+    "oversellWarning": "Possiedi solo {{available}} unità — le posizioni corte non sono supportate.",
     "noPriceBadge": "senza prezzo",
     "noPriceWarning": "Aggiunto senza prezzo di acquisto — aggiungi i tuoi acquisti per tracciare prezzo medio e rendimento.",
     "colAsset": "Attività",

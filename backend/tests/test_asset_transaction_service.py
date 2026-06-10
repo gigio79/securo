@@ -202,6 +202,94 @@ async def test_update_transaction_recomputes(session, test_workspace, market_ass
 
 
 @pytest.mark.asyncio
+async def test_full_exit_marks_sold(session, test_workspace, market_asset):
+    await asset_transaction_service.add_transaction(
+        session, market_asset.id, test_workspace.id,
+        AssetTransactionCreate(kind="buy", quantity=Decimal("10"), price=Decimal("20"), date=date(2026, 1, 1)),
+    )
+    read = await asset_transaction_service.add_transaction(
+        session, market_asset.id, test_workspace.id,
+        AssetTransactionCreate(kind="sell", quantity=Decimal("10"), price=Decimal("30"), date=date(2026, 6, 1)),
+    )
+    assert read.units == 0
+    assert read.average_price is None
+    assert read.sell_date == date(2026, 6, 1)  # drops out of the active portfolio
+    assert round(read.realized_gain, 2) == 100.00
+
+
+@pytest.mark.asyncio
+async def test_rebuy_after_full_exit_resets_position(session, test_workspace, market_asset):
+    await asset_transaction_service.add_transaction(
+        session, market_asset.id, test_workspace.id,
+        AssetTransactionCreate(kind="buy", quantity=Decimal("10"), price=Decimal("20"), date=date(2026, 1, 1)),
+    )
+    await asset_transaction_service.add_transaction(
+        session, market_asset.id, test_workspace.id,
+        AssetTransactionCreate(kind="sell", quantity=Decimal("10"), price=Decimal("30"), date=date(2026, 2, 1)),
+    )
+    read = await asset_transaction_service.add_transaction(
+        session, market_asset.id, test_workspace.id,
+        AssetTransactionCreate(kind="buy", quantity=Decimal("5"), price=Decimal("40"), date=date(2026, 3, 1)),
+    )
+    assert read.units == 5
+    assert round(read.average_price, 2) == 40.00
+    assert read.sell_date is None  # re-entered → no longer "sold"
+    # Realized gain from the earlier round-trip is retained.
+    assert round(read.realized_gain, 2) == 100.00
+
+
+@pytest.mark.asyncio
+async def test_multiple_sells_accumulate_realized_gain(session, test_workspace, market_asset):
+    await asset_transaction_service.add_transaction(
+        session, market_asset.id, test_workspace.id,
+        AssetTransactionCreate(kind="buy", quantity=Decimal("10"), price=Decimal("20"), date=date(2026, 1, 1)),
+    )
+    await asset_transaction_service.add_transaction(
+        session, market_asset.id, test_workspace.id,
+        AssetTransactionCreate(kind="sell", quantity=Decimal("3"), price=Decimal("30"), date=date(2026, 2, 1)),
+    )
+    read = await asset_transaction_service.add_transaction(
+        session, market_asset.id, test_workspace.id,
+        AssetTransactionCreate(kind="sell", quantity=Decimal("2"), price=Decimal("25"), date=date(2026, 3, 1)),
+    )
+    # (30-20)*3 + (25-20)*2 = 30 + 10 = 40
+    assert read.units == 5
+    assert round(read.realized_gain, 2) == 40.00
+
+
+@pytest.mark.asyncio
+async def test_buy_into_holding_separate_across_wallets(session, test_workspace, test_user):
+    from app.models.asset_group import AssetGroup
+
+    wallet = AssetGroup(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
+        name="Broker A", icon="wallet", color="#0EA5E9", position=0, source="manual",
+    )
+    session.add(wallet)
+    await session.commit()
+
+    provider = _FakeProvider({"ITUB4.SA": _quote("ITUB4.SA", 30.0)})
+    ungrouped = await asset_transaction_service.buy_into_holding(
+        session, test_workspace.id, test_user.id,
+        AssetBuyCreate(ticker="ITUB4.SA", quantity=Decimal("10"), price=Decimal("28"), date=date(2026, 1, 1)),
+        market_provider=provider,
+    )
+    walleted = await asset_transaction_service.buy_into_holding(
+        session, test_workspace.id, test_user.id,
+        AssetBuyCreate(ticker="ITUB4.SA", quantity=Decimal("5"), price=Decimal("32"), date=date(2026, 2, 1), group_id=wallet.id),
+        market_provider=provider,
+    )
+    # Same ticker, different wallet → distinct holdings (not consolidated).
+    assert ungrouped.id != walleted.id
+    rows = (
+        await session.execute(
+            select(Asset).where(Asset.workspace_id == test_workspace.id, Asset.ticker == "ITUB4.SA")
+        )
+    ).scalars().all()
+    assert len(rows) == 2
+
+
+@pytest.mark.asyncio
 async def test_buy_into_holding_consolidates_by_ticker(session, test_workspace, test_user):
     provider = _FakeProvider({"VALE3.SA": _quote("VALE3.SA", 60.0)})
     first = await asset_transaction_service.buy_into_holding(

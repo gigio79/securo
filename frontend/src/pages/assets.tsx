@@ -1902,6 +1902,24 @@ function PortfolioChart({ data, wallets, currency, locale: loc, dateLocale: date
   )
 }
 
+// Marker drawn on the value chart where a buy (green) or sell (red) happened.
+// Recharts calls this per data point; non-trade points render an empty group.
+function renderAssetTradeDot(props: {
+  cx?: number; cy?: number; index?: number; payload?: { trades?: AssetTransaction[] }
+}) {
+  const { cx, cy, index, payload } = props
+  const trades = payload?.trades
+  if (cx == null || cy == null || !trades || trades.length === 0) {
+    return <g key={`td-${index}`} />
+  }
+  const hasBuy = trades.some(t => t.kind === 'buy')
+  const hasSell = trades.some(t => t.kind === 'sell')
+  const color = hasSell && !hasBuy ? '#F43F5E' : hasBuy && !hasSell ? '#10B981' : '#6366F1'
+  return (
+    <circle key={`td-${index}`} cx={cx} cy={cy} r={4} fill={color} stroke="var(--card)" strokeWidth={1.5} />
+  )
+}
+
 function AssetDetail({ assetId, currency, locale: loc, dateLocale: dateLoc, purchasePrice, purchaseDate, valuationMethod, canWrite, chartOnly = false }: {
   assetId: string; currency: string; locale: string; dateLocale: string
   purchasePrice: number | null; purchaseDate: string | null
@@ -1942,6 +1960,30 @@ function AssetDetail({ assetId, currency, locale: loc, dateLocale: dateLoc, purc
 
     return result
   }, [trend, purchasePrice, purchaseDate])
+
+  // Buy/sell markers on the value chart (shares the ledger's query cache).
+  // Without these, a jump in the line could be either a price move or a
+  // quantity change — the markers label "you bought/sold here".
+  const { data: assetTrades } = useQuery({
+    queryKey: ['asset-transactions', assetId],
+    queryFn: () => assets.transactions(assetId),
+    enabled: valuationMethod === 'market_price',
+  })
+  const chartData = useMemo(() => {
+    const pts = trendWithPurchase.map(p => ({ ...p, trades: [] as AssetTransaction[] }))
+    if (!assetTrades || pts.length === 0) return pts
+    for (const tx of assetTrades) {
+      const txTime = new Date(tx.date + 'T00:00:00').getTime()
+      let best = 0
+      let bestDiff = Infinity
+      for (let i = 0; i < pts.length; i++) {
+        const diff = Math.abs(new Date(pts[i].date + 'T00:00:00').getTime() - txTime)
+        if (diff < bestDiff) { bestDiff = diff; best = i }
+      }
+      pts[best].trades.push(tx)
+    }
+    return pts
+  }, [trendWithPurchase, assetTrades])
 
   // Build value history with purchase as the initial entry
   const valuesWithPurchase = useMemo(() => {
@@ -2006,7 +2048,7 @@ function AssetDetail({ assetId, currency, locale: loc, dateLocale: dateLoc, purc
           <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">{t('assets.valueTrend')}</p>
           <div className="h-44 -mx-1">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={trendWithPurchase} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
+              <AreaChart data={chartData} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
                 <defs>
                   <linearGradient id={`gradient-${assetId}`} x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor={chartColor} stopOpacity={0.2} />
@@ -2037,15 +2079,22 @@ function AssetDetail({ assetId, currency, locale: loc, dateLocale: dateLoc, purc
                   }}
                 />
                 <RechartsTooltip
-                  formatter={(value: number | undefined) => [mask(formatCurrency(value ?? 0, currency, loc)), t('assets.currentValue')]}
-                  labelFormatter={(label: unknown) => new Date(String(label) + 'T00:00:00').toLocaleDateString(dateLoc, { day: 'numeric', month: 'long', year: 'numeric' })}
-                  contentStyle={{
-                    background: 'var(--card)',
-                    color: 'var(--foreground)',
-                    border: '1px solid var(--border)',
-                    borderRadius: '0.75rem',
-                    fontSize: '12px',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                  content={({ active, payload, label }) => {
+                    if (!active || !payload?.length) return null
+                    const pt = payload[0].payload as { amount?: number; trades?: AssetTransaction[] }
+                    return (
+                      <div style={{ background: 'var(--card)', color: 'var(--foreground)', border: '1px solid var(--border)', borderRadius: '0.75rem', fontSize: '12px', boxShadow: '0 4px 12px rgba(0,0,0,0.08)', padding: '8px 10px' }}>
+                        <p style={{ fontWeight: 600, marginBottom: 4 }}>
+                          {new Date(String(label) + 'T00:00:00').toLocaleDateString(dateLoc, { day: 'numeric', month: 'long', year: 'numeric' })}
+                        </p>
+                        <div style={{ fontVariantNumeric: 'tabular-nums' }}>{mask(formatCurrency(pt.amount ?? 0, currency, loc))}</div>
+                        {pt.trades?.map((tx) => (
+                          <div key={tx.id} style={{ marginTop: 3, fontSize: 11, fontWeight: 500, color: tx.kind === 'buy' ? '#10B981' : '#F43F5E' }}>
+                            {tx.kind === 'buy' ? t('assets.txBuy') : t('assets.txSell')} {mask(`${tx.quantity}`)} × {mask(formatCurrency(tx.price, currency, loc))}
+                          </div>
+                        ))}
+                      </div>
+                    )
                   }}
                 />
                 <Area
@@ -2054,7 +2103,7 @@ function AssetDetail({ assetId, currency, locale: loc, dateLocale: dateLoc, purc
                   stroke={chartColor}
                   strokeWidth={2}
                   fill={`url(#gradient-${assetId})`}
-                  dot={false}
+                  dot={renderAssetTradeDot}
                   activeDot={{ r: 4, strokeWidth: 2, fill: 'var(--card)', stroke: chartColor }}
                 />
               </AreaChart>

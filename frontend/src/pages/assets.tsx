@@ -175,6 +175,18 @@ const GROWTH_FREQUENCIES = ['daily', 'weekly', 'monthly', 'yearly'] as const
 // Ativo · Quant. · Preço Médio · Preço Atual · Rentab. · Saldo · % · actions.
 const HOLDINGS_GRID = 'minmax(0,2.4fr) 0.7fr 1.1fr 1fr 0.9fr 1.3fr 0.6fr 4.5rem'
 
+// Surface the backend's actual error message (FastAPI puts it in
+// response.data.detail) instead of a generic toast. Makes failures
+// diagnosable — e.g. the oversell guard message, or a "Not Found" when a
+// transaction endpoint is missing because the backend is older than the
+// frontend (issue #315) — rather than a cryptic "Error".
+function assetErrorMessage(e: unknown, fallback: string): string {
+  const resp = (e as { response?: { data?: { detail?: unknown }; status?: number } })?.response
+  const detail = resp?.data?.detail
+  if (typeof detail === 'string' && detail.trim()) return detail
+  return resp?.status ? `${fallback} (${resp.status})` : fallback
+}
+
 export default function AssetsPage() {
   const { t } = useTranslation()
   const locale = useDisplayLocale()
@@ -341,7 +353,7 @@ export default function AssetsPage() {
       setDialogOpen(false)
       toast.success(t('assets.created'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (e) => toast.error(assetErrorMessage(e, t('common.error'))),
   })
 
   const updateMutation = useMutation({
@@ -353,7 +365,7 @@ export default function AssetsPage() {
       setEditingAsset(null)
       toast.success(t('assets.updated'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (e) => toast.error(assetErrorMessage(e, t('common.error'))),
   })
 
   const deleteMutation = useMutation({
@@ -364,7 +376,7 @@ export default function AssetsPage() {
       if (expandedId === deletingId) setExpandedId(null)
       toast.success(t('assets.deleted'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (e) => toast.error(assetErrorMessage(e, t('common.error'))),
   })
 
   const refreshPriceMutation = useMutation({
@@ -385,7 +397,7 @@ export default function AssetsPage() {
       refetchAssetViews()
       toast.success(t('assets.priceRefreshed'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (e) => toast.error(assetErrorMessage(e, t('common.error'))),
   })
 
   const { data: rawWalletsList } = useQuery({
@@ -411,7 +423,7 @@ export default function AssetsPage() {
       }
       toast.success(t('assets.walletCreated'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (e) => toast.error(assetErrorMessage(e, t('common.error'))),
   })
 
   const updateWalletMutation = useMutation({
@@ -423,7 +435,7 @@ export default function AssetsPage() {
       setEditingWallet(null)
       toast.success(t('assets.walletUpdated'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (e) => toast.error(assetErrorMessage(e, t('common.error'))),
   })
 
   const deleteWalletMutation = useMutation({
@@ -435,7 +447,7 @@ export default function AssetsPage() {
       setDeletingWalletId(null)
       toast.success(t('assets.walletDeleted'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (e) => toast.error(assetErrorMessage(e, t('common.error'))),
   })
 
   const moveAssetMutation = useMutation({
@@ -447,7 +459,7 @@ export default function AssetsPage() {
       setMovingAsset(null)
       toast.success(t('assets.moved'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (e) => toast.error(assetErrorMessage(e, t('common.error'))),
   })
 
   // Compute projected current value for growth_rule preview in the form
@@ -1952,7 +1964,7 @@ function AssetDetail({ assetId, currency, locale: loc, dateLocale: dateLoc, purc
       setValueAmount('')
       toast.success(t('assets.valueAdded'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (e) => toast.error(assetErrorMessage(e, t('common.error'))),
   })
 
   const deleteValueMutation = useMutation({
@@ -1965,7 +1977,7 @@ function AssetDetail({ assetId, currency, locale: loc, dateLocale: dateLoc, purc
       queryClient.refetchQueries({ queryKey: ['dashboard'] })
       toast.success(t('assets.valueDeleted'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (e) => toast.error(assetErrorMessage(e, t('common.error'))),
   })
 
   // Determine chart color based on trend direction
@@ -2222,7 +2234,7 @@ function AssetTransactionsTab({
       setEditingTx(null)
       toast.success(t('assets.txSaved'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (e) => toast.error(assetErrorMessage(e, t('common.error'))),
   })
 
   const deleteMutation = useMutation({
@@ -2232,7 +2244,7 @@ function AssetTransactionsTab({
       setDeletingId(null)
       toast.success(t('assets.txDeleted'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (e) => toast.error(assetErrorMessage(e, t('common.error'))),
   })
 
   function openAdd() {
@@ -2574,7 +2586,7 @@ function HoldingLedger({
       onChanged()
       toast.success(t('assets.txDeleted'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (e) => toast.error(assetErrorMessage(e, t('common.error'))),
   })
 
   return (
@@ -2677,7 +2689,7 @@ function AddHoldingTransactionDialog({
       onClose()
       toast.success(t('assets.txSaved'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (e) => toast.error(assetErrorMessage(e, t('common.error'))),
   })
 
   const cur = holding?.currency ?? 'USD'

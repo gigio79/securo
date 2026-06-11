@@ -237,6 +237,11 @@ export default function AssetsPage() {
   const [tickerSearchLoading, setTickerSearchLoading] = useState(false)
   const [selectedQuote, setSelectedQuote] = useState<MarketSymbolQuote | null>(null)
   const [formUnits, setFormUnits] = useState('')
+  // Per-unit purchase price for the opening buy of a market-priced holding.
+  // Defaults to the live quote (buying at market now) and is the SAME input
+  // model as the buy/sell ledger — no total-purchase-price for tickers, so
+  // "Add asset" and "Add transaction" stay consistent.
+  const [formUnitPrice, setFormUnitPrice] = useState('')
   const [quoteLoading, setQuoteLoading] = useState(false)
 
   const { data: rawAssetsList, isLoading } = useQuery({
@@ -517,6 +522,10 @@ export default function AssetsPage() {
     try {
       const quote = await assets.marketQuote(match.symbol)
       setSelectedQuote(quote)
+      // Prefill the unit price with the live quote — "buying at market now"
+      // is the common case; the user overrides it with their real cost.
+      // Trim float noise to the DB's 6-decimal scale (39.41999… → 39.42).
+      setFormUnitPrice(String(Number(quote.price.toFixed(6))))
       // Auto-fill name/currency from the authoritative quote so the user
       // doesn't have to think about it — they can still edit name after.
       if (!formName || formName === (selectedQuote?.name ?? selectedQuote?.symbol ?? '')) {
@@ -544,6 +553,7 @@ export default function AssetsPage() {
     setTickerMatches([])
     setSelectedQuote(null)
     setFormUnits('')
+    setFormUnitPrice('')
     setQuoteLoading(false)
     setTickerSearchLoading(false)
   }
@@ -605,6 +615,7 @@ export default function AssetsPage() {
   }
 
   function buildPayload() {
+    const isMarket = formMethod === 'market_price'
     const payload: Record<string, unknown> = {
       name: formName,
       type: formType,
@@ -612,9 +623,12 @@ export default function AssetsPage() {
       group_id: formGroupId || null,
       valuation_method: formMethod,
       purchase_date: formPurchaseDate || null,
-      purchase_price: formPurchasePrice ? parseFloat(formPurchasePrice) : null,
-      sell_date: formSellDate || null,
-      sell_price: formSellPrice ? parseFloat(formSellPrice) : null,
+      // Tickers have no total purchase price — the cost basis is derived from
+      // the unit-price buy (and then the ledger). Only manual/growth assets
+      // carry a total purchase price.
+      purchase_price: isMarket ? null : (formPurchasePrice ? parseFloat(formPurchasePrice) : null),
+      sell_date: isMarket ? null : (formSellDate || null),
+      sell_price: isMarket ? null : (formSellPrice ? parseFloat(formSellPrice) : null),
     }
 
     if (formMethod === 'growth_rule') {
@@ -624,10 +638,15 @@ export default function AssetsPage() {
       payload.growth_start_date = formGrowthStartDate || null
     }
 
-    if (formMethod === 'market_price') {
+    if (isMarket) {
       payload.ticker = (selectedQuote?.symbol || formTickerQuery || '').toUpperCase()
       payload.ticker_exchange = selectedQuote?.exchange ?? null
       payload.units = formUnits ? parseFloat(formUnits) : null
+      // Opening buy price per unit (defaults to the live quote on the server
+      // when omitted). Only meaningful on create.
+      if (!editingAsset) {
+        payload.unit_price = formUnitPrice ? parseFloat(formUnitPrice) : null
+      }
     }
 
     if (!editingAsset && formCurrentValue) {
@@ -1283,27 +1302,49 @@ export default function AssetsPage() {
                   </div>
                 )}
 
-                <div className="space-y-2">
-                  <Label>{t('assets.quantity')}</Label>
-                  <Input
-                    type="number"
-                    step="any"
-                    min="0"
-                    value={formUnits}
-                    onChange={e => setFormUnits(e.target.value)}
-                    placeholder="10"
-                  />
-                </div>
+                {!editingAsset ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label>{t('assets.quantity')}</Label>
+                      <Input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={formUnits}
+                        onChange={e => setFormUnits(e.target.value)}
+                        placeholder="10"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>{t('assets.unitPrice')}</Label>
+                      <Input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={formUnitPrice}
+                        onChange={e => setFormUnitPrice(e.target.value)}
+                        placeholder={selectedQuote ? String(selectedQuote.price) : '0.00'}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Label>{t('assets.quantity')}</Label>
+                    <Input type="number" step="any" min="0" value={formUnits} onChange={e => setFormUnits(e.target.value)} placeholder="10" />
+                  </div>
+                )}
 
-                {selectedQuote && formUnits && parseFloat(formUnits) > 0 && (
+                {/* Buy total — same qty × unit price model as the ledger, so
+                    the value matches the Add-transaction dialog exactly. */}
+                {!editingAsset && formUnits && parseFloat(formUnits) > 0 && (selectedQuote || formUnitPrice) && (
                   <div className="flex items-center justify-between p-3 rounded-lg border border-primary/30 bg-primary/10">
                     <span className="text-xs font-medium text-primary/80">
-                      {t('assets.currentValue')}
+                      {t('assets.txTotal')}
                     </span>
                     <span className="text-lg font-bold tabular-nums text-primary">
                       {formatCurrency(
-                        selectedQuote.price * parseFloat(formUnits),
-                        selectedQuote.currency,
+                        (parseFloat(formUnitPrice) || selectedQuote?.price || 0) * parseFloat(formUnits),
+                        selectedQuote?.currency || formCurrency,
                         locale,
                       )}
                     </span>
@@ -1363,29 +1404,36 @@ export default function AssetsPage() {
               </div>
             )}
 
-            {/* Purchase Info */}
+            {/* Purchase Info. For tickers the cost comes from the unit-price
+                buy above, so we only ask for the purchase (buy) date here and
+                hide the total-price field. Manual assets keep both. */}
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>{t('assets.purchaseDate')}</Label>
                 <DatePickerInput value={formPurchaseDate} onChange={setFormPurchaseDate} />
               </div>
-              <div className="space-y-2">
-                <Label>{t('assets.purchasePrice')}</Label>
-                <Input type="number" step="0.01" value={formPurchasePrice} onChange={e => setFormPurchasePrice(e.target.value)} />
-              </div>
+              {formMethod !== 'market_price' && (
+                <div className="space-y-2">
+                  <Label>{t('assets.purchasePrice')}</Label>
+                  <Input type="number" step="0.01" value={formPurchasePrice} onChange={e => setFormPurchasePrice(e.target.value)} />
+                </div>
+              )}
             </div>
 
-            {/* Sell Info */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>{t('assets.sellDate')}</Label>
-                <DatePickerInput value={formSellDate} onChange={setFormSellDate} />
+            {/* Sell Info — manual assets only. Tickers record sells through the
+                buy/sell ledger, not the create form. */}
+            {formMethod !== 'market_price' && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>{t('assets.sellDate')}</Label>
+                  <DatePickerInput value={formSellDate} onChange={setFormSellDate} />
+                </div>
+                <div className="space-y-2">
+                  <Label>{t('assets.sellPrice')}</Label>
+                  <Input type="number" step="0.01" value={formSellPrice} onChange={e => setFormSellPrice(e.target.value)} />
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label>{t('assets.sellPrice')}</Label>
-                <Input type="number" step="0.01" value={formSellPrice} onChange={e => setFormSellPrice(e.target.value)} />
-              </div>
-            </div>
+            )}
 
             {/* Current Value — manual only */}
             {!editingAsset && formMethod === 'manual' && (

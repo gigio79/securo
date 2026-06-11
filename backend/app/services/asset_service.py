@@ -436,9 +436,12 @@ async def create_asset(
     if data.valuation_method == "market_price" and quote is not None and data.units and data.units > 0:
         from app.services import asset_transaction_service
 
+        # Unit price is the per-unit cost of the opening buy (consistent with
+        # the ledger). Fall back to the live quote when the user didn't enter
+        # one ("bought at market now").
         buy_price = (
-            Decimal(str(data.purchase_price)) / Decimal(str(data.units))
-            if data.purchase_price is not None
+            Decimal(str(data.unit_price))
+            if data.unit_price is not None
             else Decimal(str(quote.price))
         )
         session.add(

@@ -824,15 +824,19 @@ export default function AssetsPage() {
 
         {isExpanded && (
           isMarketPriced ? (
-            <HoldingLedger
-              asset={asset}
-              locale={locale}
-              dateLocale={dateLocale}
-              mask={mask}
-              canWrite={canWrite}
-              onAdd={() => openAddTransaction(asset.id)}
-              onChanged={refetchAssetViews}
-            />
+            <>
+              {/* Value-evolution chart on top, then the buy/sell ledger. */}
+              <AssetDetail assetId={asset.id} currency={asset.currency} locale={locale} dateLocale={dateLocale} purchasePrice={asset.purchase_price} purchaseDate={asset.purchase_date} valuationMethod={asset.valuation_method} canWrite={canWrite} chartOnly />
+              <HoldingLedger
+                asset={asset}
+                locale={locale}
+                dateLocale={dateLocale}
+                mask={mask}
+                canWrite={canWrite}
+                onAdd={() => openAddTransaction(asset.id)}
+                onChanged={refetchAssetViews}
+              />
+            </>
           ) : (
             <AssetDetail assetId={asset.id} currency={asset.currency} locale={locale} dateLocale={dateLocale} purchasePrice={asset.purchase_price} purchaseDate={asset.purchase_date} valuationMethod={asset.valuation_method} canWrite={canWrite} />
           )
@@ -1898,11 +1902,14 @@ function PortfolioChart({ data, wallets, currency, locale: loc, dateLocale: date
   )
 }
 
-function AssetDetail({ assetId, currency, locale: loc, dateLocale: dateLoc, purchasePrice, purchaseDate, valuationMethod, canWrite }: {
+function AssetDetail({ assetId, currency, locale: loc, dateLocale: dateLoc, purchasePrice, purchaseDate, valuationMethod, canWrite, chartOnly = false }: {
   assetId: string; currency: string; locale: string; dateLocale: string
   purchasePrice: number | null; purchaseDate: string | null
   valuationMethod: string
   canWrite: boolean
+  // When true, render only the value-evolution chart (used above the ledger
+  // for market-priced holdings) — no manual value form / value-history list.
+  chartOnly?: boolean
 }) {
   const { t } = useTranslation()
   const { mask } = usePrivacyMode()
@@ -1986,10 +1993,15 @@ function AssetDetail({ assetId, currency, locale: loc, dateLocale: dateLoc, purc
     : true
   const chartColor = trendIsPositive ? '#10B981' : '#F43F5E'
 
+  const hasChart = trendWithPurchase.length > 1
+  // In chart-only mode (market-priced holdings, paired with the ledger) there's
+  // nothing to show until the value series has at least two points.
+  if (chartOnly && !hasChart) return null
+
   return (
     <div className="border-t border-border px-5 py-5 space-y-5 bg-muted/5">
       {/* Value Trend Chart */}
-      {trendWithPurchase.length > 1 && (
+      {hasChart && (
         <div>
           <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-3">{t('assets.valueTrend')}</p>
           <div className="h-44 -mx-1">
@@ -2052,7 +2064,7 @@ function AssetDetail({ assetId, currency, locale: loc, dateLocale: dateLoc, purc
       )}
 
       {/* Add Value Form — only for manual assets */}
-      {valuationMethod === 'manual' && canWrite && <div className="flex items-end gap-2">
+      {!chartOnly && valuationMethod === 'manual' && canWrite && <div className="flex items-end gap-2">
         <div className="flex-1">
           <Label className="text-[11px] text-muted-foreground">{t('assets.amount')}</Label>
           <Input
@@ -2088,7 +2100,7 @@ function AssetDetail({ assetId, currency, locale: loc, dateLocale: dateLoc, purc
       </div>}
 
       {/* Value History */}
-      <div>
+      {!chartOnly && <div>
         <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">{t('assets.valueHistory')}</p>
         {valuesLoading ? (
           <Skeleton className="h-20 w-full rounded-lg" />
@@ -2138,7 +2150,7 @@ function AssetDetail({ assetId, currency, locale: loc, dateLocale: dateLoc, purc
         ) : (
           <p className="text-xs text-muted-foreground py-3 text-center">{t('dashboard.noData')}</p>
         )}
-      </div>
+      </div>}
     </div>
   )
 }

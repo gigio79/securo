@@ -177,6 +177,34 @@ async def test_sync_merges_into_placeholder(session, test_user, test_workspace, 
 
 
 @pytest.mark.asyncio
+async def test_sync_early_charge_advances_and_no_duplicate(
+    session, test_user, test_workspace, conn_account
+):
+    """A charge that posts before the expected occurrence links, advances the
+    bill, and does NOT leave an opening for generate_pending to duplicate it."""
+    from app.services.recurring_transaction_service import generate_pending
+
+    conn, account = conn_account
+    conn_id, account_id = conn.id, account.id
+    bill = await _make_bill(session, test_workspace, test_user, account,
+                            start_date=date(2025, 1, 10))
+    bill_id = bill.id
+    # Posts 2 days early, inside the before-window of the Jan 10 occurrence.
+    provider = _provider([_tx(external_id="s1", description="NETFLIX SUBSCRIPTION",
+                              amount=Decimal("39.90"), date=date(2025, 1, 8))])
+    await _run_sync(session, conn_id, test_workspace, test_user, provider)
+
+    refreshed = await session.get(RecurringTransaction, bill_id)
+    assert refreshed.next_occurrence == date(2025, 2, 10)  # advanced despite early posting
+
+    # generate_pending past the Jan 10 occurrence must not re-create it.
+    await generate_pending(session, test_user.id, up_to=date(2025, 1, 20))
+    txs = await _all_txs(session, account_id)
+    assert len(txs) == 1
+    assert txs[0].recurring_transaction_id == bill_id
+
+
+@pytest.mark.asyncio
 async def test_sync_amount_mismatch_not_linked(session, test_user, test_workspace, conn_account):
     conn, account = conn_account
     conn_id, account_id = conn.id, account.id

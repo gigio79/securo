@@ -170,7 +170,14 @@ async def find_bill_for_incoming(
 
 
 def advance_past(recurring: RecurringTransaction, fulfilled_date: date) -> None:
-    """Advance a bill's next_occurrence past a fulfilled occurrence date.
+    """Advance a bill's next_occurrence past the occurrence a charge fulfilled.
+
+    The target is floored at the bill's current next_occurrence — the matched
+    occurrence — so an *early-posted* charge (one that lands inside the
+    before-window, i.e. before next_occurrence) still moves the pointer forward.
+    Advancing only past the posting date would leave next_occurrence unchanged
+    for early charges (e.g. a Jan 8 charge for a Jan 10 occurrence), and
+    generate_pending would then re-create that occurrence as a duplicate.
 
     Deactivates the bill if it advances beyond its end_date. Lazy-imports the
     date helper to avoid a circular import with recurring_transaction_service.
@@ -178,8 +185,9 @@ def advance_past(recurring: RecurringTransaction, fulfilled_date: date) -> None:
     from app.services.recurring_transaction_service import _advance_date
 
     intended_day = recurring.day_of_month or recurring.start_date.day
+    target = max(fulfilled_date, recurring.next_occurrence)
     guard = 0
-    while recurring.next_occurrence <= fulfilled_date and guard < 500:
+    while recurring.next_occurrence <= target and guard < 500:
         recurring.next_occurrence = _advance_date(
             recurring.next_occurrence, recurring.frequency, intended_day=intended_day
         )

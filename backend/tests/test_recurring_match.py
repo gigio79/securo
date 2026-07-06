@@ -207,6 +207,15 @@ async def test_advance_past_deactivates_past_end_date(session, test_user, test_w
     assert bill.is_active is False
 
 
+@pytest.mark.asyncio
+async def test_advance_past_early_charge_still_advances(session, test_user, test_workspace, account):
+    """An early-posted charge (inside the before-window, before next_occurrence)
+    must still advance the pointer, or generate_pending would duplicate it."""
+    bill = await _make_bill(session, test_workspace, test_user, account)  # next_occ 2025-01-10
+    rms.advance_past(bill, date(2025, 1, 8))  # 2 days early
+    assert bill.next_occurrence == date(2025, 2, 10)
+
+
 # ---------------------------------------------------------------------------
 # generate_pending integration
 # ---------------------------------------------------------------------------

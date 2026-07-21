@@ -1201,6 +1201,7 @@
   "common": {
     "view": "Ansehen",
     "save": "Speichern",
+    "saving": "Wird gespeichert…",
     "cancel": "Abbrechen",
     "close": "Schließen",
     "more": "Weitere Aktionen",

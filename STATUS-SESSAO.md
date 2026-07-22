@@ -1,7 +1,7 @@
 # Status da Sessao - Talisma
 
 **Data:** 21/07/2026
-**Ultima atualizacao:** 18:45
+**Ultima atualizacao:** 19:15
 
 ---
 
@@ -86,6 +86,22 @@
 |---|---|---|---|
 | Empréstimo Vó Beti - Mensal | R$ 60,00 | 12 | Recorrente sem data fim |
 | Empréstimo Vó Beti - Parcelado (67x) | R$ 402,00 | 67 | Parcelado até fev/2032 |
+
+### 4. Versionamento Git configurado
+
+- ✅ Fork criado: `https://github.com/gigio79/securo`
+- ✅ Remote `origin` → `gigio79/securo` (seu fork)
+- ✅ Remote `upstream` → `securo-finance/securo` (original)
+- ✅ Commit: `dee6fd6` — feat: rebrand Securo → Talisma
+- ✅ Token GitHub salvo em `~/.config/gh/hosts.yml`
+
+**Para atualizar com upstream:**
+```bash
+cd /home/giovanni/projetos/talisma
+git fetch upstream
+git merge upstream/main
+git push origin main
+```
 
 ---
 
@@ -409,6 +425,7 @@ bash scripts/create_cc_payment_counterparts.sh
 10. **Personalizar logo e cores do branding**
 11. ~~**Configurar categorias por grupo de despesas**~~ ✅ Concluido (21/07 - Categoria "Empréstimos" criada)
 12. **Importar extratos bancarios via Pluggy**
+13. ~~**Configurar versionamento Git**~~ ✅ Concluido (21/07 - Fork gigio79/securo)
 
 ---
 

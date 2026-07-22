@@ -452,7 +452,8 @@ bash scripts/create_cc_payment_counterparts.sh
 - Saldos dos cartões Nubank, InfinitePay e Mercado Pago inalterados
 
 **Tarde (Categorias e Versionamento):**
-- Investigação do saldo negativo da Carteira (-R$ 89.038,64) — diagnóstico: sem receitas cadastradas
+- Investigação do saldo negativo da Carteira (-R$ 89.038,64) — diagnóstico: sem receitas cadastradas ainda
+  - **Nota:** Receitas serão cadastradas quando iniciar o fluxo (dia 1 e dia 15 de cada mês)
 - Categoria "Empréstimos" criada e 81 transações atualizadas (79 geradas + 2 recorrências)
 - Empréstimos da Vó Beti renomeados para distinção clara
 - Fork GitHub criado: `gigio79/securo`

@@ -54,6 +54,7 @@ def parse_pix_received(text: str) -> Optional[ParsedNotification]:
     Examples:
         "Pix recebidoVoce recebeu um Pix de Giovanni Bispo Dos Reis Silva CPF *.727.668- no valor de R$ 0,65."
         "Pix recebido de João Silva no valor de R$ 50,00"
+        "PicPay • agoraGIOVANNI BISPO DOS REIS SILVA enviou um Pix para você Você recebeu um Pix de R$ 0,65."
     """
     # Pattern 1: "Pix recebido" + "no valor de R$ X,XX"
     pattern = r'Pix\s+recebido.*?de\s+(.+?)(?:\s+CPF\s+\*?[\d.\-]+)?\s+no\s+valor\s+de\s+R\$\s*([\d.,]+)'
@@ -65,6 +66,42 @@ def parse_pix_received(text: str) -> Optional[ParsedNotification]:
         parsed.payee = match.group(1).strip()
         parsed.description = f"Pix recebido - {parsed.payee}"
         parsed.amount = _parse_amount(match.group(2))
+        return parsed
+    
+    # Pattern 2: "enviou um Pix para você" + "Você recebeu um Pix de R$ X,XX"
+    pattern2 = r'enviou\s+um\s+Pix\s+para\s+você.*?Você\s+recebeu\s+um\s+Pix\s+de\s+R\$\s*([\d.,]+)'
+    match2 = re.search(pattern2, text, re.IGNORECASE | re.DOTALL)
+    
+    if match2:
+        parsed = ParsedNotification()
+        parsed.type = "credit"
+        # Extract sender name (before "enviou")
+        name_pattern = r'([A-ZÀ-Ú\s]+)\s+enviou\s+um\s+Pix'
+        name_match = re.search(name_pattern, text)
+        parsed.payee = name_match.group(1).strip() if name_match else "Desconhecido"
+        parsed.description = f"Pix recebido - {parsed.payee}"
+        parsed.amount = _parse_amount(match2.group(1))
+        return parsed
+    
+    return None
+
+
+def parse_pix_sent(text: str) -> Optional[ParsedNotification]:
+    """Parse Pix sent notification.
+    
+    Examples:
+        "Neon • agoraPix enviadoVocê enviou um Pix no valor de R$ 0,65."
+        "PicPay • agoraPix enviadoVocê enviou um Pix de R$ 50,00"
+    """
+    # Pattern: "Pix enviado" + "R$ X,XX"
+    pattern = r'Pix\s+enviado.*?(?:no\s+valor\s+de|de)\s+R\$\s*([\d.,]+)'
+    match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+    
+    if match:
+        parsed = ParsedNotification()
+        parsed.type = "debit"
+        parsed.description = "Pix enviado"
+        parsed.amount = _parse_amount(match.group(1))
         return parsed
     
     return None
@@ -166,6 +203,7 @@ def parse_notification(text: str) -> Optional[ParsedNotification]:
     """Try all parsers in order until one matches."""
     parsers = [
         parse_pix_received,
+        parse_pix_sent,
         parse_debit_purchase,
         parse_transfer_received,
         parse_generic_amount,  # Fallback - always last

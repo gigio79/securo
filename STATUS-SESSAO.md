@@ -442,12 +442,30 @@ bash scripts/create_cc_payment_counterparts.sh
 
 **Pronto para retomar na proxima sessao!**
 
-**Resumo da sessao 21/07:**
+**Resumo da sessao 21/07 (manhã + tarde):**
+
+**Manhã (Reorganização Financeira):**
 - Renomeação: Cartão Vó → Cartão da Vó Bete
 - 36 pagamentos de cartão convertidos para débitos na Carteira (categoria Transferências)
 - 3 recorrências atualizadas para Carteira + Transferências
 - Script `create_cc_payment_counterparts.sh` criado para automação
 - Saldos dos cartões Nubank, InfinitePay e Mercado Pago inalterados
+
+**Tarde (Categorias e Versionamento):**
+- Investigação do saldo negativo da Carteira (-R$ 89.038,64) — diagnóstico: sem receitas cadastradas
 - Categoria "Empréstimos" criada e 81 transações atualizadas (79 geradas + 2 recorrências)
 - Empréstimos da Vó Beti renomeados para distinção clara
+- Fork GitHub criado: `gigio79/securo`
+- Remotes configurados: origin (fork) + upstream (securo-finance)
+- Commit `dee6fd6`: rebrand Talisma + scripts + docs
+- Commit `e31d19d`: session notes atualizadas
 - Nenhuma alteração no código do sistema (apenas dados)
+
+**Commits:**
+- `dee6fd6` — feat: rebrand Securo → Talisma
+- `e31d19d` — docs: update session notes
+
+**Próxima sessão (sugestão):**
+1. Investigar por que a Carteira não tem receitas (salário/renda)
+2. Personalizar logo e cores do branding
+3. Importar extratos bancários via Pluggy

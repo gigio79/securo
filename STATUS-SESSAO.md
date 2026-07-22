@@ -426,6 +426,7 @@ bash scripts/create_cc_payment_counterparts.sh
 11. ~~**Configurar categorias por grupo de despesas**~~ ✅ Concluido (21/07 - Categoria "Empréstimos" criada)
 12. **Importar extratos bancarios via Pluggy**
 13. ~~**Configurar versionamento Git**~~ ✅ Concluido (21/07 - Fork gigio79/securo)
+14. ~~**Integrar MacroDroid para notificações bancárias**~~ ✅ Concluido (21/07 - Endpoint + parser criados)
 
 ---
 
@@ -442,7 +443,7 @@ bash scripts/create_cc_payment_counterparts.sh
 
 **Pronto para retomar na proxima sessao!**
 
-**Resumo da sessao 21/07 (manhã + tarde):**
+**Resumo da sessao 21/07 (manhã + tarde + noite):**
 
 **Manhã (Reorganização Financeira):**
 - Renomeação: Cartão Vó → Cartão da Vó Bete
@@ -462,11 +463,28 @@ bash scripts/create_cc_payment_counterparts.sh
 - Commit `e31d19d`: session notes atualizadas
 - Nenhuma alteração no código do sistema (apenas dados)
 
+**Noite (Integração MacroDroid):**
+- ✅ Endpoint `POST /api/webhooks/macrodroid` criado
+- ✅ Autenticação via API Key (`X-API-Key` header)
+- ✅ Parser de notificações bancárias (Pix, compra, transferência)
+- ✅ Testado com sucesso - transação criada automaticamente
+- ✅ Documentação completa: `docs/MACRODROID_SETUP.md`
+- ✅ Script de deploy: `scripts/deploy-backend.sh`
+
 **Commits:**
 - `dee6fd6` — feat: rebrand Securo → Talisma
 - `e31d19d` — docs: update session notes
 
+**Arquivos criados/modificados:**
+- `backend/app/api/macrodroid_webhook.py` — endpoint + parser (NOVO)
+- `backend/app/main.py` — registro do router
+- `backend/app/core/config.py` — setting `macrodroid_api_key`
+- `.env` — API key configurada
+- `docker-compose.prod.yml` — variável de ambiente
+- `docs/MACRODROID_SETUP.md` — documentação completa
+- `scripts/deploy-backend.sh` — script de deploy
+
 **Próxima sessão (sugestão):**
-1. Investigar por que a Carteira não tem receitas (salário/renda)
+1. Configurar MacroDroid no celular com a API key
 2. Personalizar logo e cores do branding
 3. Importar extratos bancários via Pluggy

@@ -117,6 +117,9 @@ class Settings(BaseSettings):
     # external dependency on the Brazilian government endpoint).
     tesouro_direto_enabled: bool = True
 
+    # MacroDroid webhook (bank notification automation)
+    macrodroid_api_key: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", secrets_dir=CREDENTIALS_DIRECTORY)
 
 

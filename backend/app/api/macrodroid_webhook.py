@@ -231,55 +231,38 @@ async def receive_macrodroid_notification(
             detail=f"Could not parse notification text: {payload.text[:200]}"
         )
     
-    # Get default workspace and user
+    # Get workspace and account
     from app.models.workspace import Workspace
     from app.models.workspace import WorkspaceMember
-    
-    # Get first active workspace
-    result = await session.execute(
-        select(Workspace).where(Workspace.is_archived == False).limit(1)
-    )
-    workspace = result.scalar_one_or_none()
-    if not workspace:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="No active workspace found"
-        )
-    
-    # Get workspace owner
-    result = await session.execute(
-        select(WorkspaceMember).where(
-            WorkspaceMember.workspace_id == workspace.id,
-            WorkspaceMember.role.in_(["owner", "editor"])
-        ).limit(1)
-    )
-    member = result.scalar_one_or_none()
-    if not member:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="No writable workspace member found"
-        )
-    
-    user_id = member.user_id
     
     # Find account (default to Carteira or use provided account_id)
     if payload.account_id:
         account_id = uuid.UUID(payload.account_id)
+        # Get account's workspace
+        result = await session.execute(
+            select(Account).where(Account.id == account_id)
+        )
+        account = result.scalar_one_or_none()
+        if not account:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Account not found: {account_id}"
+            )
+        workspace_id = account.workspace_id
     else:
-        # Find "Carteira" account
+        # Find "Carteira" account first
         result = await session.execute(
             select(Account).where(
-                Account.workspace_id == workspace.id,
                 Account.name.ilike("%carteira%"),
                 Account.is_closed == False
             ).limit(1)
         )
         account = result.scalar_one_or_none()
+        
         if not account:
             # Fallback to first checking account
             result = await session.execute(
                 select(Account).where(
-                    Account.workspace_id == workspace.id,
                     Account.type == "checking",
                     Account.is_closed == False
                 ).limit(1)
@@ -293,6 +276,23 @@ async def receive_macrodroid_notification(
             )
         
         account_id = account.id
+        workspace_id = account.workspace_id
+    
+    # Get workspace owner
+    result = await session.execute(
+        select(WorkspaceMember).where(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.role.in_(["owner", "editor"])
+        ).limit(1)
+    )
+    member = result.scalar_one_or_none()
+    if not member:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No writable workspace member found"
+        )
+    
+    user_id = member.user_id
     
     # Create transaction
     tx_data = TransactionCreate(
@@ -308,7 +308,7 @@ async def receive_macrodroid_notification(
     
     try:
         transaction = await transaction_service.create_transaction(
-            session, workspace.id, user_id, tx_data
+            session, workspace_id, user_id, tx_data
         )
         return TransactionRead.model_validate(transaction, from_attributes=True)
     except ValueError as e:

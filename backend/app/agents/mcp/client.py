@@ -34,7 +34,7 @@ class _ServerSpec:
 
 def _parse_servers() -> list[_ServerSpec]:
     s = get_agent_settings()
-    out = [_ServerSpec(name="securo", url=s.builtin_mcp_url)]
+    out = [_ServerSpec(name="talisma", url=s.builtin_mcp_url)]
     extra = (s.extra_mcp_servers or "").strip()
     if extra:
         for raw in extra.split(","):

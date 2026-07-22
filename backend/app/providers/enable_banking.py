@@ -249,7 +249,7 @@ class EnableBankingProvider(BankProvider):
                 "Authorization": f"Bearer {self._jwt_token()}",
                 "Accept": "application/json",
                 "Content-Type": "application/json",
-                "User-Agent": "Securo/0.1 (+https://usesecuro.com)",
+                "User-Agent": "Talisma/0.1 (+https://talisma.conectagente.online)",
             },
             timeout=30.0,
         )

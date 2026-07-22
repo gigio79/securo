@@ -831,7 +831,7 @@ export const rules = {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `securo-categorization-rules-${new Date().toISOString().slice(0, 10)}.json`
+    a.download = `talisma-categorization-rules-${new Date().toISOString().slice(0, 10)}.json`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -1173,7 +1173,7 @@ export const backup = {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `securo-backup-${new Date().toISOString().slice(0, 10)}.zip`
+    a.download = `talisma-backup-${new Date().toISOString().slice(0, 10)}.zip`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)

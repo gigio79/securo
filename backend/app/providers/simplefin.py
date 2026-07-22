@@ -151,7 +151,7 @@ class SimpleFinProvider(BankProvider):
             timeout=SIMPLEFIN_HTTP_TIMEOUT,
             headers={
                 "Accept": "application/json",
-                "User-Agent": "Securo/0.1 (+https://usesecuro.com)",
+                "User-Agent": "Talisma/0.1 (+https://talisma.conectagente.online)",
             },
         )
 

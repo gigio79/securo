@@ -24,7 +24,7 @@ wO-vkfjg_MOALsMgktNa9sOd2fArD6xGdxCcT21PRGc
 
 1. Abra o MacroDroid
 2. Toque em "+" para criar nova macro
-3. Nomeie: "Talisma - Notificações Bancárias"
+3. Nomeie: "Talisma - Auto"
 
 ### Passo 2: Configurar Trigger (Gatilho)
 
@@ -41,9 +41,9 @@ wO-vkfjg_MOALsMgktNa9sOd2fArD6xGdxCcT21PRGc
 3. Configure:
    - **URL:** `https://talisma.conectagente.online/api/webhooks/macrodroid`
    - **Method:** POST
-   - **Headers:**
-     - Nome: `X-API-Key`
-     - Valor: `wO-vkfjg_MOALsMgktNa9sOd2fArD6xGdxCcT21PRGc`
+   - **Authentication:** Basic Auth
+     - **Username:** `talisma`
+     - **Password:** `wO-vkfjg_MOALsMgktNa9sOd2fArD6xGdxCcT21PRGc`
    - **Body:**
      ```json
      {"text": "%notification_text%"}
@@ -80,8 +80,9 @@ Valor: R$ 1.000,00
 ## Solução de Problemas
 
 ### Erro 401 (Unauthorized)
-- Verifique se a API Key está correta
-- Verifique se o header `X-API-Key` está configurado
+- Verifique se o usuário/senha estão corretos
+- Usuário: `talisma`
+- Senha: `wO-vkfjg_MOALsMgktNa9sOd2fArD6xGdxCcT21PRGc`
 
 ### Erro 422 (Unprocessable Entity)
 - O formato da notificação não foi reconhecido
@@ -124,18 +125,32 @@ curl -s "http://localhost:8000/api/accounts" \
 
 ## Segurança
 
-- A API Key é verificada a cada requisição
+- A autenticação é verificada a cada requisição (Basic Auth ou API Key)
 - Use HTTPS em produção
-- Não compartilhe a API Key publicamente
-- Revogue a chave se comprometida (altere no .env e reinicie o backend)
+- Não compartilhe as credenciais publicamente
+- Revogue as credenciais se comprometidas (altere no .env e reinicie o backend)
+
+## Credenciais
+
+| Campo | Valor |
+|-------|-------|
+| **URL** | `https://talisma.conectagente.online/api/webhooks/macrodroid` |
+| **Usuário** | `talisma` |
+| **Senha** | `wO-vkfjg_MOALsMgktNa9sOd2fArD6xGdxCcT21PRGc` |
 
 ## Comandos Úteis
 
 ```bash
-# Testar endpoint
+# Testar com Basic Auth
 curl -X POST "https://talisma.conectagente.online/api/webhooks/macrodroid" \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: SUA_API_KEY" \
+  -H "Authorization: Basic $(echo -n 'talisma:wO-vkfjg_MOALsMgktNa9sOd2fArD6xGdxCcT21PRGc' | base64)" \
+  -d '{"text": "Pix recebido de João no valor de R$ 50,00"}'
+
+# Testar com API Key
+curl -X POST "https://talisma.conectagente.online/api/webhooks/macrodroid" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: wO-vkfjg_MOALsMgktNa9sOd2fArD6xGdxCcT21PRGc" \
   -d '{"text": "Pix recebido de João no valor de R$ 50,00"}'
 
 # Ver logs do backend

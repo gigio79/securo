@@ -186,27 +186,41 @@ def parse_notification(text: str) -> Optional[ParsedNotification]:
 @router.post("/macrodroid", response_model=TransactionRead, status_code=status.HTTP_201_CREATED)
 async def receive_macrodroid_notification(
     payload: MacroDroidPayload,
-    x_api_key: str = Header(..., description="API key for MacroDroid authentication"),
+    authorization: Optional[str] = Header(None, description="Basic Auth (user:pass) or API Key"),
+    x_api_key: Optional[str] = Header(None, description="API key for MacroDroid authentication"),
     session: AsyncSession = Depends(get_async_session),
 ):
     """Receive bank notification from MacroDroid and create transaction.
     
-    This endpoint is designed for Android automation apps like MacroDroid
-    to send bank notification texts that are automatically parsed and
-    created as transactions in Talisma.
+    Supports two authentication methods:
+    - Basic Auth: Authorization: Basic base64(user:pass)
+    - API Key: X-API-Key: your-api-key
     """
-    # Validate API key
     settings = get_settings()
-    if not settings.macrodroid_api_key:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="MacroDroid integration not configured (MACRODROID_API_KEY not set)"
-        )
     
-    if x_api_key != settings.macrodroid_api_key:
+    # Authentication: Basic Auth or API Key
+    authenticated = False
+    
+    # Method 1: Basic Auth
+    if authorization and authorization.startswith("Basic "):
+        import base64
+        try:
+            decoded = base64.b64decode(authorization[6:]).decode("utf-8")
+            user, password = decoded.split(":", 1)
+            if user == "talisma" and password == settings.macrodroid_api_key:
+                authenticated = True
+        except Exception:
+            pass
+    
+    # Method 2: API Key in header
+    if not authenticated and x_api_key:
+        if x_api_key == settings.macrodroid_api_key:
+            authenticated = True
+    
+    if not authenticated:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API key"
+            detail="Invalid credentials. Use Basic Auth (user:pass) or X-API-Key header."
         )
     
     # Parse notification
